@@ -1,0 +1,26 @@
+# 秘密情報
+.env
+.streamlit/secrets.toml
+*token*.json
+credentials.json
+# サービスアカウント鍵（DWD用）の置き場
+secrets/
+*service*account*.json
+*-drive-*.json
+# プロジェクト鍵・ダウンロードした鍵（絶対にコミットしない）
+*.json.key
+ダウンロード/
+eigyou-ro-pure-*.json
+*eigyou-ro-pure*.json
+
+# データ（評価履歴・模範トークの実体）
+data/evaluations/*
+data/reference_talks/*
+!data/**/.gitkeep
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.DS_Store

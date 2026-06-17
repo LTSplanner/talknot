@@ -1,0 +1,27 @@
+# 秘密情報・ローカル実体はイメージに含めない（実行時に環境変数/Secret Managerで注入）
+.env
+.env.*
+secrets/
+.streamlit/secrets.toml
+*token*.json
+credentials.json
+*service*account*.json
+*-drive-*.json
+
+# ローカルデータ（本番は GCS に保存）
+data/evaluations/*
+data/reference_talks/*
+
+# 開発用・不要物
+.git/
+.gitignore
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+tests/
+.DS_Store
+*.md
+docs/
+scripts/

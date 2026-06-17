@@ -1,0 +1,14 @@
+# TalKnot — dependencies
+streamlit>=1.40
+python-dotenv>=1.0
+
+# Google Workspace 連携（OAuth / Drive）
+google-auth>=2.30
+google-auth-oauthlib>=1.2
+google-api-python-client>=2.130
+
+# Gemini API（動画・音声解析）
+google-genai>=0.3
+
+# 永続化（Cloud Run 等で評価履歴・模範トークを保存）
+google-cloud-storage>=2.16
