@@ -10,16 +10,27 @@ GOOGLE_CLIENT_ID/SECRET が設定されていれば本物の Google 認証を、
 """
 from __future__ import annotations
 
+import os
 import tempfile
 from pathlib import Path
 
 import streamlit as st
 
-from auth import google_oauth, session
-from config import settings
-from core.models import EvaluationResult
-from services import drive_sa, gemini_analyzer, google_drive, storage
-from ui import components, theme
+# Streamlit Cloud では秘密情報を st.secrets（TOML）で渡す。config.settings は
+# os.getenv で読むため、プロジェクト import より前に os.environ へ橋渡しする。
+# ローカル（secrets.toml 無し）では st.secrets アクセスが例外になるので握りつぶす。
+try:
+    for _k, _v in st.secrets.items():
+        if isinstance(_v, str):
+            os.environ.setdefault(_k, _v)
+except Exception:
+    pass
+
+from auth import google_oauth, session  # noqa: E402
+from config import settings  # noqa: E402
+from core.models import EvaluationResult  # noqa: E402
+from services import drive_sa, gemini_analyzer, google_drive, storage  # noqa: E402
+from ui import components, theme  # noqa: E402
 
 st.set_page_config(
     page_title="トークノット｜営業ロープレ評価",
