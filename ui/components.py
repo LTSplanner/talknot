@@ -33,6 +33,26 @@ def _score_badge(score: int) -> str:
     )
 
 
+def _dual_axis_badge(reference_score: int, sales_score: int) -> str:
+    """🎯模範視点 ／ 💼営業プロ視点 の2スコアを横並びで表示する。"""
+    ref_axis = settings.AXES_BY_KEY["reference"]
+    sales_axis = settings.AXES_BY_KEY["sales"]
+    ref_c = theme.score_color(reference_score)
+    sales_c = theme.score_color(sales_score)
+    return (
+        '<div style="display:flex;gap:.6rem;margin:.4rem 0">'
+        f'<div style="flex:1;text-align:center;background:{ref_c}14;border-radius:12px;padding:.35rem">'
+        f'<div style="font-size:.72rem;color:{theme.MUTED}">{ref_axis.icon} {ref_axis.title}</div>'
+        f'<div style="font-size:1.35rem;font-weight:700;color:{ref_c}">{reference_score}'
+        f'<span style="font-size:.7rem;color:{theme.MUTED}"> / 5</span></div></div>'
+        f'<div style="flex:1;text-align:center;background:{sales_c}14;border-radius:12px;padding:.35rem">'
+        f'<div style="font-size:.72rem;color:{theme.MUTED}">{sales_axis.icon} {sales_axis.title}</div>'
+        f'<div style="font-size:1.35rem;font-weight:700;color:{sales_c}">{sales_score}'
+        f'<span style="font-size:.7rem;color:{theme.MUTED}"> / 5</span></div></div>'
+        '</div>'
+    )
+
+
 def criteria_overview() -> None:
     """5つの評価項目をカードで一覧表示する。"""
     cols = st.columns(len(settings.EVALUATION_CRITERIA))
@@ -51,21 +71,32 @@ def criteria_overview() -> None:
 
 
 def evaluation_result(result: EvaluationResult) -> None:
-    """評価結果を表示する：5項目スコア → 全体講評 → タイムスタンプ別 Before/After。"""
-    st.markdown(f"#### 総合スコア {result.total} / {len(settings.EVALUATION_CRITERIA) * 5}")
+    """評価結果を表示する：2軸の総合 → 5項目を2軸スコア → 全体講評 → Before/After。"""
+    full = len(settings.EVALUATION_CRITERIA) * 5
+    ref_axis = settings.AXES_BY_KEY["reference"]
+    sales_axis = settings.AXES_BY_KEY["sales"]
+    c1, c2 = st.columns(2)
+    with c1:
+        st.metric(f"{ref_axis.icon} {ref_axis.title} 合計", f"{result.reference_total} / {full}")
+    with c2:
+        st.metric(f"{sales_axis.icon} {sales_axis.title} 合計", f"{result.sales_total} / {full}")
 
     cols = st.columns(len(settings.EVALUATION_CRITERIA))
     for col, c in zip(cols, settings.EVALUATION_CRITERIA):
         s = result.score_for(c.key)
-        score = s.score if s else 0
+        ref_s = s.reference_score if s else 0
+        sales_s = s.sales_score if s else 0
+        ref_cmt = s.reference_comment if s else ""
+        sales_cmt = s.sales_comment if s else ""
         with col:
             st.markdown(
                 f"""
                 <div class="tk-card">
                     <div class="tk-icon">{c.icon}</div>
                     <h4><span class="tk-num">{c.number}</span> {c.title}</h4>
-                    {_score_badge(score)}
-                    <p>{(s.comment if s else "")}</p>
+                    {_dual_axis_badge(ref_s, sales_s)}
+                    <p><b>{sales_axis.icon}</b> {sales_cmt}</p>
+                    <p style="color:{theme.MUTED};font-size:.82rem"><b>{ref_axis.icon}</b> {ref_cmt}</p>
                 </div>
                 """,
                 unsafe_allow_html=True,

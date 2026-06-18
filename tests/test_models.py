@@ -3,8 +3,20 @@ from core.models import EvaluationResult
 
 SAMPLE = {
     "scores": [
-        {"key": "emotion_catch", "score": 4, "comment": "感情をよく拾えていた"},
-        {"key": "excitement", "score": 5, "comment": "ワクワク感が高まった"},
+        {
+            "key": "emotion_catch",
+            "reference_score": 3,
+            "reference_comment": "模範に近い拾い方",
+            "sales_score": 4,
+            "sales_comment": "感情をよく拾えていた",
+        },
+        {
+            "key": "excitement",
+            "reference_score": 4,
+            "reference_comment": "あと一歩で模範級",
+            "sales_score": 5,
+            "sales_comment": "ワクワク感が高まった",
+        },
     ],
     "feedback": [
         {
@@ -28,21 +40,35 @@ def test_from_dict_parses_all_fields():
     assert r.summary == "全体的に好印象でした"
 
 
-def test_total_and_score_for():
+def test_two_axis_totals_and_score_for():
     r = EvaluationResult.from_dict(SAMPLE)
-    assert r.total == 9
-    assert r.score_for("excitement").score == 5
+    assert r.sales_total == 9          # 4 + 5
+    assert r.reference_total == 7      # 3 + 4
+    assert r.total == r.sales_total    # 後方互換は営業視点の合計
+    assert r.score_for("excitement").sales_score == 5
+    assert r.score_for("excitement").reference_score == 4
     assert r.score_for("unknown") is None
 
 
 def test_roundtrip_to_dict():
     r = EvaluationResult.from_dict(SAMPLE)
     again = EvaluationResult.from_dict(r.to_dict())
-    assert again.total == r.total
+    assert again.sales_total == r.sales_total
+    assert again.reference_total == r.reference_total
     assert again.feedback[0].before == r.feedback[0].before
+
+
+def test_legacy_single_score_is_applied_to_both_axes():
+    """旧形式（score/comment のみ）も両軸に流用して読めること。"""
+    r = EvaluationResult.from_dict(
+        {"scores": [{"key": "excitement", "score": 5, "comment": "良い"}]}
+    )
+    s = r.score_for("excitement")
+    assert s.reference_score == 5 and s.sales_score == 5
+    assert s.reference_comment == "良い" and s.sales_comment == "良い"
 
 
 def test_from_dict_tolerates_missing_fields():
     r = EvaluationResult.from_dict({})
     assert r.scores == [] and r.feedback == [] and r.summary == ""
-    assert r.total == 0
+    assert r.total == 0 and r.reference_total == 0

@@ -151,3 +151,39 @@ EVALUATION_CRITERIA: list[Criterion] = [
 ]
 
 CRITERIA_BY_KEY = {c.key: c for c in EVALUATION_CRITERIA}
+
+
+# --- 評価の2軸（各項目をこの2視点で採点する）---
+@dataclass(frozen=True)
+class Axis:
+    key: str          # Gemini 出力のフィールド接頭辞（reference_score / sales_score）
+    title: str        # 表示名
+    description: str   # 何の視点か
+    icon: str         # UI 用アイコン
+
+
+EVALUATION_AXES: list[Axis] = [
+    Axis(
+        key="reference",
+        title="模範トーク視点",
+        description="登録された模範トーク（無ければ住宅営業トップの理想トーク）と比べて、どれだけ近づけたか。",
+        icon="🎯",
+    ),
+    Axis(
+        key="sales",
+        title="営業プロ視点",
+        description="住宅営業のトップセールス兼コーチとして見た、その項目の完成度。",
+        icon="💼",
+    ),
+]
+AXES_BY_KEY = {a.key: a for a in EVALUATION_AXES}
+
+# --- 営業特化AIペルソナ（評価者の人格）---
+# 評価プロンプトの冒頭に置き、AIに「住宅営業のプロ」として振る舞わせる。
+SALES_AI_PERSONA = (
+    "あなたは住宅営業のトップセールスであり、後輩を本気で伸ばすロープレコーチです。"
+    "「理想の家」を一緒に描く商談を数百件成約させてきた実績があり、"
+    "お客様の本音・不安・ワクワクを、声のトーン・間・発話比率から敏感に読み取ります。"
+    "評価は常にポジティブで、できている点を具体的に称えたうえで、"
+    "次にどう言えばさらに刺さるかを営業現場の言葉で示します。"
+)

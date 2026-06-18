@@ -16,17 +16,34 @@ def build_evaluation_prompt(reference_talk: str | None = None) -> str:
     reference_block = (
         f"\n# 模範トーク（社内基準）\n{reference_talk}\n" if reference_talk else ""
     )
-    return f"""あなたは住宅営業の商談・ロープレを評価するベテランコーチです。
+    reference_axis_note = (
+        "reference（🎯 模範トーク視点）は、上の『模範トーク』と比べてどれだけ近づけたかで採点する。"
+        if reference_talk
+        else "reference（🎯 模範トーク視点）は、住宅営業トップの理想トークを基準に、どれだけ近いかで採点する（模範トーク未登録のため理想像を基準にする）。"
+    )
+    return f"""{settings.SALES_AI_PERSONA}
+
 動画（または音声）から、文字面だけでなく「声のトーン」「間」「発話比率」を手がかりに、
 お客様の感情の動きを読み取ってください。批判ではなく、会話がもっと弾むための
 ポジティブな振り返りを行います。
 {reference_block}
-# 評価項目（各 1〜5 段階）
+# 評価の2軸（各項目を、必ず次の2つの視点それぞれで 1〜5 段階で採点する）
+- reference（🎯 模範トーク視点）：{settings.AXES_BY_KEY['reference'].description}
+- sales（💼 営業プロ視点）：{settings.AXES_BY_KEY['sales'].description}
+{reference_axis_note}
+
+# 評価項目
 {criteria_lines}
 
 # 出力フォーマット（JSON のみ。前後に説明文を付けない）
 {{
-  "scores": [{{"key": "<上記key>", "score": <1-5>, "comment": "<ポジティブな講評>"}}],
+  "scores": [{{
+    "key": "<上記key>",
+    "reference_score": <1-5>,
+    "reference_comment": "<模範トーク視点での講評（近い点・差分・学ぶ点）>",
+    "sales_score": <1-5>,
+    "sales_comment": "<営業プロ視点での講評（できている点・次の一手）>"
+  }}],
   "feedback": [{{
     "timestamp": "MM:SS",
     "criterion_key": "<関連する評価項目key>",
@@ -34,7 +51,8 @@ def build_evaluation_prompt(reference_talk: str | None = None) -> str:
     "before": "<実際のトーク。感情をスルーしていた箇所>",
     "after": "<本来こう言うべきだった、の具体的な改善トーク例>"
   }}],
-  "summary": "<全体のポジティブな振り返り>"
+  "summary": "<2軸を踏まえた全体のポジティブな振り返り>"
 }}
 
+各項目について reference と sales の両方のスコア・講評を必ず出してください。
 feedback は必ず動画内の具体的なタイムスタンプ付きで、Before/After をセットで出してください。"""
