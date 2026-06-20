@@ -68,3 +68,36 @@ def analyze(video_path: str, reference_talk: str | None = None) -> EvaluationRes
 
     data = json.loads(response.text)
     return EvaluationResult.from_dict(data)
+
+
+# 模範トーク動画を「テキスト基準」に変換するためのプロンプト
+_REFERENCE_TRANSCRIBE_PROMPT = (
+    "この動画は住宅営業の『模範商談』です。後輩が学べる基準テキストを作ってください。\n"
+    "1) 営業担当の実際のトークを、お客様とのやり取りの流れがわかる形で文字起こしする。\n"
+    "2) 最後に『この模範トークの要点（間の取り方・感情の拾い方・刺さる言い回し）』を箇条書きで添える。\n"
+    "出力はプレーンテキストのみ。"
+)
+
+
+def transcribe_reference(video_path: str) -> str:
+    """模範トーク動画を、評価基準に使える『テキスト』へ変換して返す。
+
+    重い動画は保存せず、この軽いテキストだけを蓄積するために使う（容量対策）。
+    """
+    client = _client()
+    uploaded = client.files.upload(file=video_path)
+    uploaded = _wait_until_active(client, uploaded)
+    try:
+        response = client.models.generate_content(
+            model=settings.GEMINI_MODEL,
+            contents=[uploaded, _REFERENCE_TRANSCRIBE_PROMPT],
+            config=types.GenerateContentConfig(
+                media_resolution=types.MediaResolution.MEDIA_RESOLUTION_LOW,
+            ),
+        )
+    finally:
+        try:
+            client.files.delete(name=uploaded.name)
+        except Exception:
+            pass
+    return (response.text or "").strip()

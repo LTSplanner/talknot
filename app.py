@@ -235,6 +235,27 @@ def _render_drive_picker(creds, user: dict) -> None:
         _run_analysis(video_bytes, ".mp4", user, labels[file_id])
 
 
+def _register_reference_from_video(data: bytes, suffix: str, name: str) -> None:
+    """模範トーク動画を文字起こしして『テキスト基準』として保存する（動画は保存しない＝容量対策）。"""
+    if suffix.lower() == ".txt":
+        storage.save_reference_talk(data.decode("utf-8", errors="ignore"))
+        return
+    with tempfile.NamedTemporaryFile(suffix=suffix or ".mp4", delete=False) as tmp:
+        tmp.write(data)
+        tmp_path = tmp.name
+    try:
+        with st.spinner("模範トークをAIが文字起こし中…"):
+            transcript = gemini_analyzer.transcribe_reference(tmp_path)
+        if transcript:
+            storage.save_reference_talk(transcript)
+        else:
+            st.warning("文字起こし結果が空でした。別の動画でお試しください。")
+    except Exception as exc:
+        st.error(_friendly_gemini_error(exc))
+    finally:
+        Path(tmp_path).unlink(missing_ok=True)
+
+
 def render_reference_tab(user: dict) -> None:
     st.markdown("##### 模範トーク")
     st.write("全社員が共通の基準で評価されるよう、管理者が模範トークを登録します。")
@@ -254,8 +275,9 @@ def render_reference_tab(user: dict) -> None:
         if text.strip():
             storage.save_reference_talk(text)
         if file is not None:
-            storage.save_reference_talk(file.getvalue(), file.name)
-        st.success("模範トークを登録しました。")
+            _register_reference_from_video(file.getvalue(), Path(file.name).suffix, file.name)
+        if text.strip() or file is not None:
+            st.success("模範トークを登録しました。")
 
     # 基準アカウント（kkyoya@ / hkumada@ など）のドライブから模範動画を選んで登録する。
     if drive_sa.configured() and settings.REFERENCE_ACCOUNTS:
@@ -300,7 +322,7 @@ def _render_reference_drive_picker() -> None:
         with st.spinner("ドライブから動画を取得中…"):
             video_bytes = google_drive.download_file(creds, file_id)
         name = labels[file_id].split("　")[0]
-        storage.save_reference_talk(video_bytes, name)
+        _register_reference_from_video(video_bytes, ".mp4", name)
         st.success(f"{account} の「{name}」を模範トークとして登録しました。")
 
 
