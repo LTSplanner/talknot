@@ -127,8 +127,16 @@ def _run_analysis(video_bytes: bytes, suffix: str, user: dict, label: str) -> No
         tmp_path = tmp.name
     try:
         with st.spinner("AI がお客様の感情の動きを読み解いています…"):
-            result = gemini_analyzer.analyze(tmp_path, storage.get_reference_talk())
+            result = gemini_analyzer.analyze(
+                tmp_path,
+                storage.get_reference_talk(),
+                storage.get_knowledge_base(),
+            )
         storage.save_evaluation(user["email"], result, label)
+        # 商談から抽出した弊社ナレッジを蓄積（使うほど評価が弊社仕様に賢くなる）
+        added = storage.append_knowledge(result.knowledge)
+        if added:
+            st.caption(f"🧠 この商談から弊社ナレッジを {added} 件 学習しました。")
         st.session_state["last_result"] = result
     except Exception as exc:  # API エラー等。アプリを落とさず利用者に伝える。
         st.error(_friendly_gemini_error(exc))
@@ -337,17 +345,55 @@ def render_history_tab(user: dict) -> None:
             components.evaluation_result(EvaluationResult.from_dict(rec["result"]))
 
 
+_CATEGORY_LABELS = {
+    "product": "🏠 商品知識",
+    "rule": "📏 社内ルール",
+    "technique": "🗣️ トーク技術",
+}
+
+
+def render_knowledge_tab(user: dict) -> None:
+    st.markdown("##### 弊社ナレッジ（AIが商談から学んだ社内知識）")
+    st.write(
+        "商談を評価するたびに、AI が『商品知識・社内ルール・トーク技術』を抽出して"
+        "ここに蓄積します。次回からの評価はこの知識を前提に、弊社仕様で行われます。"
+        "（個人情報は含めません）"
+    )
+    items = storage.get_knowledge_items()
+    if not items:
+        st.caption("まだ蓄積された知識はありません。商談を評価すると貯まっていきます。")
+        return
+
+    st.caption(f"蓄積件数：{len(items)} 件")
+    for cat, label in _CATEGORY_LABELS.items():
+        group = [i["point"] for i in items if i.get("category") == cat]
+        if not group:
+            continue
+        st.markdown(f"**{label}**（{len(group)}件）")
+        for p in group:
+            st.markdown(f"- {p}")
+
+    if settings.is_admin(user.get("email")):
+        st.divider()
+        if st.button("🗑️ 蓄積した知識をすべて消去", key="clear_knowledge"):
+            storage.clear_knowledge()
+            st.success("弊社ナレッジを消去しました。")
+            st.rerun()
+
+
 def render_app(user: dict) -> None:
     components.sidebar(user)
     components.hero(compact=True)
 
-    evaluate, reference, history, about = st.tabs(
-        ["🎥 商談を評価する", "⭐ 模範トーク", "🕘 評価履歴", "📊 評価項目について"]
+    evaluate, reference, knowledge, history, about = st.tabs(
+        ["🎥 商談を評価する", "⭐ 模範トーク", "🧠 弊社ナレッジ", "🕘 評価履歴", "📊 評価項目について"]
     )
     with evaluate:
         render_evaluate_tab(user)
     with reference:
         render_reference_tab(user)
+    with knowledge:
+        render_knowledge_tab(user)
     with history:
         render_history_tab(user)
     with about:

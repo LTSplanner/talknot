@@ -30,6 +30,13 @@ class CriterionScore:
 
 
 @dataclass
+class KnowledgeItem:
+    """商談から抽出した弊社ナレッジの1項目（個人情報は含めない）。"""
+    category: str   # product（商品知識）/ rule（社内ルール）/ technique（トーク技術）
+    point: str      # 一般化した知識・ルール・コツ（顧客名・住所などは含めない）
+
+
+@dataclass
 class TimestampedFeedback:
     """『動画の何分何秒のトーク』単位の Before/After フィードバック。"""
     timestamp: str          # "MM:SS"
@@ -44,6 +51,7 @@ class EvaluationResult:
     scores: list[CriterionScore] = field(default_factory=list)
     feedback: list[TimestampedFeedback] = field(default_factory=list)
     summary: str = ""        # 全体講評（ポジティブな振り返り）
+    knowledge: list[KnowledgeItem] = field(default_factory=list)  # 抽出した弊社ナレッジ
 
     @property
     def total(self) -> int:
@@ -94,6 +102,14 @@ class EvaluationResult:
                 for f in data.get("feedback", [])
             ],
             summary=data.get("summary", ""),
+            knowledge=[
+                KnowledgeItem(
+                    category=k.get("category", ""),
+                    point=k.get("point", ""),
+                )
+                for k in data.get("knowledge", [])
+                if k.get("point")
+            ],
         )
 
     def to_dict(self) -> dict:
@@ -101,4 +117,5 @@ class EvaluationResult:
             "scores": [vars(s) for s in self.scores],
             "feedback": [vars(f) for f in self.feedback],
             "summary": self.summary,
+            "knowledge": [vars(k) for k in self.knowledge],
         }

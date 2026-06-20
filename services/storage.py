@@ -14,10 +14,15 @@ import time
 from pathlib import Path
 
 from config import settings
-from core.models import EvaluationResult
+from core.models import EvaluationResult, KnowledgeItem
 
 # 模範トークの基準テキストのキー（GCSオブジェクト名 / ローカルファイル名）。
 _REFERENCE_TEXT_NAME = "reference.txt"
+
+# 弊社ナレッジ（蓄積知識）の保存名と上限。
+_KNOWLEDGE_NAME = "knowledge.json"
+# 知識項目の上限。超えたら古いものから間引き、毎回の評価コストと容量を一定に保つ。
+_KNOWLEDGE_MAX_ITEMS = 150
 
 
 # --------------------------------------------------------------------------- #
@@ -93,6 +98,107 @@ def get_reference_talk() -> str | None:
     if path.exists():
         return path.read_text(encoding="utf-8")
     return None
+
+
+# --------------------------------------------------------------------------- #
+# 弊社ナレッジ（過去商談から蓄積する社内知識）
+# --------------------------------------------------------------------------- #
+_CATEGORY_LABELS = {
+    "product": "商品知識",
+    "rule": "社内ルール",
+    "technique": "トーク技術",
+}
+
+
+def _knowledge_path() -> Path:
+    return settings.DATA_DIR / _KNOWLEDGE_NAME
+
+
+def _load_knowledge() -> list[dict]:
+    if _use_gcs():
+        blob = _bucket().blob(_gcs_path(_KNOWLEDGE_NAME))
+        if not blob.exists():
+            return []
+        try:
+            return json.loads(blob.download_as_text())
+        except (json.JSONDecodeError, OSError):
+            return []
+    path = _knowledge_path()
+    if not path.exists():
+        return []
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return []
+
+
+def _save_knowledge(items: list[dict]) -> None:
+    payload = json.dumps(items, ensure_ascii=False, indent=2)
+    if _use_gcs():
+        _bucket().blob(_gcs_path(_KNOWLEDGE_NAME)).upload_from_string(
+            payload, content_type="application/json"
+        )
+        return
+    settings.DATA_DIR.mkdir(parents=True, exist_ok=True)
+    _knowledge_path().write_text(payload, encoding="utf-8")
+
+
+def append_knowledge(items: list[KnowledgeItem]) -> int:
+    """抽出した知識を蓄積する。重複は除外し、上限を超えたら古いものから間引く。
+
+    追加された新規件数を返す。
+    """
+    if not items:
+        return 0
+    existing = _load_knowledge()
+    seen = {(_norm(e.get("point", ""))) for e in existing}
+    added = 0
+    for it in items:
+        point = (it.point or "").strip()
+        if not point or _norm(point) in seen:
+            continue
+        existing.append({"category": it.category, "point": point})
+        seen.add(_norm(point))
+        added += 1
+    if added:
+        # 上限超過分は古い方（先頭）から落とす
+        existing = existing[-_KNOWLEDGE_MAX_ITEMS:]
+        _save_knowledge(existing)
+    return added
+
+
+def _norm(text: str) -> str:
+    return "".join(text.split()).lower()
+
+
+def get_knowledge_items() -> list[dict]:
+    """蓄積された知識を返す（カテゴリ・内容の dict のリスト）。"""
+    return _load_knowledge()
+
+
+def get_knowledge_base() -> str | None:
+    """評価プロンプトへ渡す『弊社ナレッジ』テキストを返す（無ければ None）。"""
+    items = _load_knowledge()
+    if not items:
+        return None
+    lines = []
+    for cat in ("product", "rule", "technique"):
+        group = [i["point"] for i in items if i.get("category") == cat]
+        if not group:
+            continue
+        lines.append(f"【{_CATEGORY_LABELS[cat]}】")
+        lines.extend(f"- {p}" for p in group)
+    # カテゴリ未分類のものも拾う
+    other = [i["point"] for i in items if i.get("category") not in _CATEGORY_LABELS]
+    if other:
+        lines.append("【その他】")
+        lines.extend(f"- {p}" for p in other)
+    return "\n".join(lines)
+
+
+def clear_knowledge() -> None:
+    """蓄積した知識をすべて消す（管理者操作）。"""
+    _save_knowledge([])
 
 
 # --------------------------------------------------------------------------- #

@@ -72,3 +72,17 @@ def test_from_dict_tolerates_missing_fields():
     r = EvaluationResult.from_dict({})
     assert r.scores == [] and r.feedback == [] and r.summary == ""
     assert r.total == 0 and r.reference_total == 0
+    assert r.knowledge == []
+
+
+def test_knowledge_parsed_and_roundtrips():
+    data = dict(SAMPLE)
+    data["knowledge"] = [
+        {"category": "product", "point": "ZEH仕様は補助金対象"},
+        {"category": "technique", "point": ""},  # 空は捨てる
+    ]
+    r = EvaluationResult.from_dict(data)
+    assert len(r.knowledge) == 1
+    assert r.knowledge[0].category == "product"
+    again = EvaluationResult.from_dict(r.to_dict())
+    assert again.knowledge[0].point == "ZEH仕様は補助金対象"

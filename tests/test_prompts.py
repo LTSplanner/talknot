@@ -36,3 +36,20 @@ def test_reference_talk_is_embedded_when_given():
 def test_no_reference_block_when_absent():
     p = prompts.build_evaluation_prompt()
     assert "# 模範トーク（社内基準）" not in p
+
+
+def test_prompt_requests_knowledge_extraction():
+    p = prompts.build_evaluation_prompt()
+    for token in ["knowledge", "category", "point", "個人情報"]:
+        assert token in p
+
+
+def test_knowledge_base_injected_when_given():
+    p = prompts.build_evaluation_prompt(knowledge_base="【商品知識】\n- ZEH仕様は補助金対象")
+    assert "弊社ナレッジ" in p
+    assert "ZEH仕様は補助金対象" in p
+
+
+def test_no_knowledge_block_when_absent():
+    p = prompts.build_evaluation_prompt()
+    assert "# 弊社ナレッジ" not in p

@@ -41,14 +41,18 @@ def _wait_until_active(client: genai.Client, file):
     return file
 
 
-def analyze(video_path: str, reference_talk: str | None = None) -> EvaluationResult:
+def analyze(
+    video_path: str,
+    reference_talk: str | None = None,
+    knowledge_base: str | None = None,
+) -> EvaluationResult:
     """動画/音声ファイルを解析し EvaluationResult を返す。"""
     client = _client()
 
     uploaded = client.files.upload(file=video_path)
     uploaded = _wait_until_active(client, uploaded)
 
-    prompt = prompts.build_evaluation_prompt(reference_talk)
+    prompt = prompts.build_evaluation_prompt(reference_talk, knowledge_base)
     response = client.models.generate_content(
         model=settings.GEMINI_MODEL,
         contents=[uploaded, prompt],
