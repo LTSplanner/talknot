@@ -79,3 +79,23 @@ def test_knowledge_clear(tmp_storage):
     storage.append_knowledge([KnowledgeItem("rule", "テスト")])
     storage.clear_knowledge()
     assert storage.get_knowledge_items() == []
+
+
+def test_background_job_lifecycle_done(tmp_storage):
+    handle = storage.start_evaluation("taro@x.com", "20260620_1_abc", "商談A")
+    recs = storage.list_evaluations("taro@x.com")
+    assert recs[0]["status"] == "processing" and recs[0]["result"] is None
+    storage.finish_evaluation(handle, "taro@x.com", EvaluationResult.from_dict(SAMPLE), "商談A")
+    recs = storage.list_evaluations("taro@x.com")
+    assert len(recs) == 1  # 同じレコードを更新（増えない）
+    assert recs[0]["status"] == "done"
+    assert recs[0]["result"]["summary"] == SAMPLE["summary"]
+
+
+def test_background_job_lifecycle_error(tmp_storage):
+    handle = storage.start_evaluation("hana@x.com", "20260620_2_def", "商談B")
+    storage.fail_evaluation(handle, "hana@x.com", "無料枠の上限です", "商談B")
+    recs = storage.list_evaluations("hana@x.com")
+    assert len(recs) == 1
+    assert recs[0]["status"] == "error"
+    assert recs[0]["error"] == "無料枠の上限です"

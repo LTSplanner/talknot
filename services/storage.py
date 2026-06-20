@@ -208,27 +208,76 @@ def _safe(user_email: str) -> str:
     return user_email.replace("@", "_at_").replace("/", "_")
 
 
+def _eval_handle(user_email: str, job_id: str) -> str:
+    """この評価レコードの保存先（GCSオブジェクト名 or ローカルパス）を返す。"""
+    fname = f"{_safe(user_email)}_{job_id}.json"
+    if _use_gcs():
+        return _gcs_path("evaluations", fname)
+    return str(settings.EVALUATIONS_DIR / fname)
+
+
+def _write_eval(handle: str, record: dict) -> None:
+    payload = json.dumps(record, ensure_ascii=False, indent=2)
+    if _use_gcs():
+        _bucket().blob(handle).upload_from_string(
+            payload, content_type="application/json"
+        )
+        return
+    _ensure_dirs()
+    Path(handle).write_text(payload, encoding="utf-8")
+
+
 def save_evaluation(user_email: str, result: EvaluationResult, label: str = "") -> str:
-    record = {
+    """評価を一括保存する（完了状態）。"""
+    handle = _eval_handle(user_email, time.strftime("%Y%m%d_%H%M%S"))
+    _write_eval(handle, {
         "user_email": user_email,
         "label": label,
         "saved_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "status": "done",
         "result": result.to_dict(),
-    }
-    payload = json.dumps(record, ensure_ascii=False, indent=2)
-    fname = f"{_safe(user_email)}_{time.strftime('%Y%m%d_%H%M%S')}.json"
+    })
+    return handle
 
-    if _use_gcs():
-        name = _gcs_path("evaluations", fname)
-        _bucket().blob(name).upload_from_string(
-            payload, content_type="application/json"
-        )
-        return name
 
-    _ensure_dirs()
-    path = settings.EVALUATIONS_DIR / fname
-    path.write_text(payload, encoding="utf-8")
-    return str(path)
+def start_evaluation(user_email: str, job_id: str, label: str = "") -> str:
+    """解析開始時に『処理中』レコードを作り、その保存ハンドルを返す。"""
+    handle = _eval_handle(user_email, job_id)
+    _write_eval(handle, {
+        "user_email": user_email,
+        "label": label,
+        "saved_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "status": "processing",
+        "result": None,
+    })
+    return handle
+
+
+def finish_evaluation(
+    handle: str, user_email: str, result: EvaluationResult, label: str = ""
+) -> None:
+    """背景解析の完了時に、同じレコードを『完了』へ更新する。"""
+    _write_eval(handle, {
+        "user_email": user_email,
+        "label": label,
+        "saved_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "status": "done",
+        "result": result.to_dict(),
+    })
+
+
+def fail_evaluation(
+    handle: str, user_email: str, error: str, label: str = ""
+) -> None:
+    """背景解析の失敗時に、同じレコードを『失敗』へ更新する。"""
+    _write_eval(handle, {
+        "user_email": user_email,
+        "label": label,
+        "saved_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "status": "error",
+        "error": error,
+        "result": None,
+    })
 
 
 def list_evaluations(user_email: str) -> list[dict]:

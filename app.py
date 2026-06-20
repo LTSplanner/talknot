@@ -12,6 +12,9 @@ from __future__ import annotations
 
 import os
 import tempfile
+import threading
+import time
+import uuid
 from pathlib import Path
 
 import streamlit as st
@@ -117,32 +120,52 @@ def _friendly_gemini_error(exc: Exception) -> str:
     return f"AI 解析でエラーが発生しました：{msg}"
 
 
-def _run_analysis(video_bytes: bytes, suffix: str, user: dict, label: str) -> None:
-    """動画 bytes を一時ファイルに保存して Gemini 解析 → 保存 → session 格納。
+def _analyze_worker(
+    handle: str, tmp_path: str, user_email: str, label: str
+) -> None:
+    """サーバーの裏で動く解析処理（st.* は一切使わない）。
 
-    解析に失敗してもアプリ全体は落とさず、原因を画面に表示する。
+    画面を閉じてもこのスレッドは走り続け、完了したら履歴レコードを更新する。
+    """
+    try:
+        result = gemini_analyzer.analyze(
+            tmp_path,
+            storage.get_reference_talk(),
+            storage.get_knowledge_base(),
+        )
+        storage.finish_evaluation(handle, user_email, result, label)
+        # 商談から抽出した弊社ナレッジを蓄積（使うほど評価が弊社仕様に賢くなる）
+        storage.append_knowledge(result.knowledge)
+    except Exception as exc:  # API エラー等。失敗として履歴に残す。
+        storage.fail_evaluation(handle, user_email, _friendly_gemini_error(exc), label)
+    finally:
+        Path(tmp_path).unlink(missing_ok=True)
+
+
+def _run_analysis(video_bytes: bytes, suffix: str, user: dict, label: str) -> None:
+    """アップロード済みの動画を『背景で』解析し、結果は履歴に出す。
+
+    アップロードさえ完了していれば、この後アプリを閉じても解析はサーバー側で続く。
     """
     with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
         tmp.write(video_bytes)
         tmp_path = tmp.name
-    try:
-        with st.spinner("AI がお客様の感情の動きを読み解いています…"):
-            result = gemini_analyzer.analyze(
-                tmp_path,
-                storage.get_reference_talk(),
-                storage.get_knowledge_base(),
-            )
-        storage.save_evaluation(user["email"], result, label)
-        # 商談から抽出した弊社ナレッジを蓄積（使うほど評価が弊社仕様に賢くなる）
-        added = storage.append_knowledge(result.knowledge)
-        if added:
-            st.caption(f"🧠 この商談から弊社ナレッジを {added} 件 学習しました。")
-        st.session_state["last_result"] = result
-    except Exception as exc:  # API エラー等。アプリを落とさず利用者に伝える。
-        st.error(_friendly_gemini_error(exc))
-        st.caption(f"（技術詳細：{type(exc).__name__}: {exc}）")
-    finally:
-        Path(tmp_path).unlink(missing_ok=True)
+
+    job_id = time.strftime("%Y%m%d_%H%M%S") + "_" + uuid.uuid4().hex[:6]
+    handle = storage.start_evaluation(user["email"], job_id, label)
+
+    thread = threading.Thread(
+        target=_analyze_worker,
+        args=(handle, tmp_path, user["email"], label),
+        daemon=True,
+    )
+    thread.start()
+
+    st.success(
+        "✅ 評価を開始しました。解析はサーバーの裏で進みます。"
+        "**この画面を閉じても大丈夫**です。"
+    )
+    st.info("結果は「🕘 評価履歴」タブに表示されます（完了まで数十秒〜数分）。")
 
 
 def render_evaluate_tab(user: dict) -> None:
@@ -173,10 +196,6 @@ def render_evaluate_tab(user: dict) -> None:
             st.info("ドライブ連携には Google ログインが必要です（デモログインでは利用不可）。")
         else:
             _render_drive_picker(creds, user)
-
-    if result := st.session_state.get("last_result"):
-        st.divider()
-        components.evaluation_result(result)
 
 
 def _render_member_drive_picker(user: dict) -> None:
@@ -334,15 +353,35 @@ def _render_reference_drive_picker() -> None:
         st.success(f"{account} の「{name}」を模範トークとして登録しました。")
 
 
+_STATUS_BADGE = {
+    "processing": "⏳ 処理中",
+    "done": "✅ 完了",
+    "error": "❌ 失敗",
+}
+
+
 def render_history_tab(user: dict) -> None:
     st.markdown("##### 評価履歴")
     records = storage.list_evaluations(user["email"])
     if not records:
         st.caption("まだ評価履歴がありません。")
         return
+
+    if any(r.get("status") == "processing" for r in records):
+        st.info("⏳ 処理中の評価があります。完了したら下に結果が出ます。")
+    if st.button("🔄 最新の状態に更新"):
+        st.rerun()
+
     for rec in records:
-        with st.expander(f"{rec.get('saved_at', '')}　{rec.get('label', '')}"):
-            components.evaluation_result(EvaluationResult.from_dict(rec["result"]))
+        status = rec.get("status", "done")
+        badge = _STATUS_BADGE.get(status, "✅ 完了")
+        with st.expander(f"{badge}　{rec.get('saved_at', '')}　{rec.get('label', '')}"):
+            if status == "processing":
+                st.caption("AI が解析中です。少し待って「🔄 最新の状態に更新」を押してください。")
+            elif status == "error":
+                st.error(rec.get("error", "解析に失敗しました。"))
+            elif rec.get("result"):
+                components.evaluation_result(EvaluationResult.from_dict(rec["result"]))
 
 
 _CATEGORY_LABELS = {
