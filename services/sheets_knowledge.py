@@ -61,9 +61,9 @@ _REFERENCE_TAB = "Reference"
 _REFERENCE_HEADER = ["id", "label", "status", "text", "added_at"]
 
 
-def _ensure_tab(svc, title: str) -> None:
+def _ensure_tab(svc, title: str, sheet_id: str | None = None) -> None:
     """シートに指定タブが無ければ作る。"""
-    sid = _cfg("KNOWLEDGE_SHEET_ID")
+    sid = sheet_id or _cfg("KNOWLEDGE_SHEET_ID")
     meta = svc.spreadsheets().get(spreadsheetId=sid).execute()
     titles = [s["properties"]["title"] for s in meta.get("sheets", [])]
     if title not in titles:
@@ -71,6 +71,76 @@ def _ensure_tab(svc, title: str) -> None:
             spreadsheetId=sid,
             body={"requests": [{"addSheet": {"properties": {"title": title}}}]},
         ).execute()
+
+
+# --------------------------------------------------------------------------- #
+# 評価履歴（各自のみ閲覧。アプリ側で user_email により絞り込む）
+# --------------------------------------------------------------------------- #
+_EVAL_TAB = "Evaluations"
+_EVAL_HEADER = ["job_id", "user_email", "saved_at", "status", "label", "result_json", "error"]
+
+
+def _eval_sheet_id() -> str:
+    return _cfg("EVALUATIONS_SHEET_ID") or _cfg("KNOWLEDGE_SHEET_ID")
+
+
+def load_evaluations() -> list[dict]:
+    """Evaluations タブの全行を返す（フィルタは呼び出し側）。"""
+    svc = _service()
+    try:
+        resp = (
+            svc.spreadsheets()
+            .values()
+            .get(spreadsheetId=_eval_sheet_id(), range=f"{_EVAL_TAB}!A2:G")
+            .execute()
+        )
+    except Exception:
+        return []
+    out: list[dict] = []
+    for row in resp.get("values", []):
+        def c(i: int) -> str:
+            return (row[i] if len(row) > i else "").strip()
+
+        if not c(0):
+            continue
+        out.append({
+            "job_id": c(0),
+            "user_email": c(1),
+            "saved_at": c(2),
+            "status": c(3) or "done",
+            "label": c(4),
+            "result_json": c(5),
+            "error": c(6),
+        })
+    return out
+
+
+def save_evaluations(items: list[dict]) -> None:
+    """Evaluations タブを全置換で書き戻す（タブが無ければ作る）。"""
+    svc = _service()
+    sid = _eval_sheet_id()
+    _ensure_tab(svc, _EVAL_TAB, sheet_id=sid)
+    svc.spreadsheets().values().clear(
+        spreadsheetId=sid, range=f"{_EVAL_TAB}!A:G"
+    ).execute()
+    values = [_EVAL_HEADER] + [
+        [
+            it.get("job_id", ""),
+            it.get("user_email", ""),
+            it.get("saved_at", ""),
+            it.get("status", "done"),
+            it.get("label", ""),
+            it.get("result_json", ""),
+            it.get("error", ""),
+        ]
+        for it in items
+    ]
+    svc.spreadsheets().values().update(
+        spreadsheetId=sid,
+        range=f"{_EVAL_TAB}!A1",
+        valueInputOption="RAW",
+        body={"values": values},
+    ).execute()
 
 
 def load_reference() -> list[dict]:

@@ -330,68 +330,123 @@ def _write_eval(handle: str, record: dict) -> None:
     Path(handle).write_text(payload, encoding="utf-8")
 
 
+def _use_eval_sheets() -> bool:
+    """評価履歴をスプレッドシートに永続保存する設定か（弊社ナレッジと同じSA）。"""
+    return _use_sheets()
+
+
+def _sheet_upsert_eval(record: dict) -> None:
+    """スプレッドシートの評価行を job_id で更新（無ければ追加）して全置換保存する。"""
+    from services import sheets_knowledge
+
+    items = sheets_knowledge.load_evaluations()
+    for it in items:
+        if it.get("job_id") == record["job_id"]:
+            it.update(record)
+            break
+    else:
+        items.append(record)
+    sheets_knowledge.save_evaluations(items)
+
+
+def _eval_record(
+    user_email: str, job_id: str, status: str, label: str,
+    result: EvaluationResult | None = None, error: str = "",
+) -> dict:
+    return {
+        "job_id": job_id,
+        "user_email": user_email,
+        "saved_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "status": status,
+        "label": label,
+        "result_json": json.dumps(result.to_dict(), ensure_ascii=False) if result else "",
+        "error": error,
+    }
+
+
 def save_evaluation(user_email: str, result: EvaluationResult, label: str = "") -> str:
     """評価を一括保存する（完了状態）。"""
-    handle = _eval_handle(user_email, time.strftime("%Y%m%d_%H%M%S"))
+    job_id = time.strftime("%Y%m%d_%H%M%S")
+    if _use_eval_sheets():
+        _sheet_upsert_eval(_eval_record(user_email, job_id, "done", label, result=result))
+        return job_id
+    handle = _eval_handle(user_email, job_id)
     _write_eval(handle, {
-        "user_email": user_email,
-        "label": label,
+        "user_email": user_email, "label": label,
         "saved_at": time.strftime("%Y-%m-%d %H:%M:%S"),
-        "status": "done",
-        "result": result.to_dict(),
+        "status": "done", "result": result.to_dict(),
     })
-    return handle
+    return job_id
 
 
 def start_evaluation(user_email: str, job_id: str, label: str = "") -> str:
-    """解析開始時に『処理中』レコードを作り、その保存ハンドルを返す。"""
-    handle = _eval_handle(user_email, job_id)
-    _write_eval(handle, {
-        "user_email": user_email,
-        "label": label,
+    """解析開始時に『処理中』レコードを作る。"""
+    if _use_eval_sheets():
+        _sheet_upsert_eval(_eval_record(user_email, job_id, "processing", label))
+        return job_id
+    _write_eval(_eval_handle(user_email, job_id), {
+        "user_email": user_email, "label": label,
         "saved_at": time.strftime("%Y-%m-%d %H:%M:%S"),
-        "status": "processing",
-        "result": None,
+        "status": "processing", "result": None,
     })
-    return handle
+    return job_id
 
 
 def finish_evaluation(
-    handle: str, user_email: str, result: EvaluationResult, label: str = ""
+    user_email: str, job_id: str, result: EvaluationResult, label: str = ""
 ) -> None:
     """背景解析の完了時に、同じレコードを『完了』へ更新する。"""
-    _write_eval(handle, {
-        "user_email": user_email,
-        "label": label,
+    if _use_eval_sheets():
+        _sheet_upsert_eval(_eval_record(user_email, job_id, "done", label, result=result))
+        return
+    _write_eval(_eval_handle(user_email, job_id), {
+        "user_email": user_email, "label": label,
         "saved_at": time.strftime("%Y-%m-%d %H:%M:%S"),
-        "status": "done",
-        "result": result.to_dict(),
+        "status": "done", "result": result.to_dict(),
     })
 
 
 def fail_evaluation(
-    handle: str, user_email: str, error: str, label: str = ""
+    user_email: str, job_id: str, error: str, label: str = ""
 ) -> None:
     """背景解析の失敗時に、同じレコードを『失敗』へ更新する。"""
-    _write_eval(handle, {
-        "user_email": user_email,
-        "label": label,
+    if _use_eval_sheets():
+        _sheet_upsert_eval(_eval_record(user_email, job_id, "error", label, error=error))
+        return
+    _write_eval(_eval_handle(user_email, job_id), {
+        "user_email": user_email, "label": label,
         "saved_at": time.strftime("%Y-%m-%d %H:%M:%S"),
-        "status": "error",
-        "error": error,
-        "result": None,
+        "status": "error", "error": error, "result": None,
     })
 
 
 def list_evaluations(user_email: str) -> list[dict]:
-    """指定ユーザーの評価履歴を新しい順で返す。"""
-    prefix_name = _safe(user_email)
+    """指定ユーザーの評価履歴を新しい順で返す（各自のみ。他人の評価は返さない）。"""
+    if _use_eval_sheets():
+        from services import sheets_knowledge
 
+        rows = [r for r in sheets_knowledge.load_evaluations()
+                if r.get("user_email") == user_email]
+        rows.sort(key=lambda r: r.get("job_id", ""), reverse=True)
+        records = []
+        for r in rows:
+            rec = {
+                "user_email": r["user_email"], "label": r.get("label", ""),
+                "saved_at": r.get("saved_at", ""), "status": r.get("status", "done"),
+                "error": r.get("error", ""), "result": None,
+            }
+            if r.get("result_json"):
+                try:
+                    rec["result"] = json.loads(r["result_json"])
+                except json.JSONDecodeError:
+                    rec["result"] = None
+            records.append(rec)
+        return records
+
+    prefix_name = _safe(user_email)
     if _use_gcs():
         bucket = _bucket()
-        blobs = list(
-            bucket.list_blobs(prefix=_gcs_path("evaluations", prefix_name))
-        )
+        blobs = list(bucket.list_blobs(prefix=_gcs_path("evaluations", prefix_name)))
         records = []
         for blob in sorted(blobs, key=lambda b: b.name, reverse=True):
             try:

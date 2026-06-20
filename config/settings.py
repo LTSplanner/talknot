@@ -98,6 +98,9 @@ KNOWLEDGE_SA_JSON = os.getenv("KNOWLEDGE_SA_JSON", "")
 KNOWLEDGE_SA_FILE = os.getenv("KNOWLEDGE_SA_FILE", "")
 KNOWLEDGE_SHEET_TAB = os.getenv("KNOWLEDGE_SHEET_TAB", "Knowledge")
 SHEETS_SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
+# 評価履歴の永続化先シート。未設定なら KNOWLEDGE_SHEET_ID と同じシート（Evaluations タブ）。
+# 将来「評価専用の別シート」に分けたくなったら、ここに別シートIDを設定するだけ。
+EVALUATIONS_SHEET_ID = os.getenv("EVALUATIONS_SHEET_ID", "")
 
 # --- Gemini ---
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")

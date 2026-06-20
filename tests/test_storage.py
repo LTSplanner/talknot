@@ -103,10 +103,10 @@ def test_knowledge_clear(tmp_storage):
 
 
 def test_background_job_lifecycle_done(tmp_storage):
-    handle = storage.start_evaluation("taro@x.com", "20260620_1_abc", "商談A")
+    storage.start_evaluation("taro@x.com", "20260620_1_abc", "商談A")
     recs = storage.list_evaluations("taro@x.com")
     assert recs[0]["status"] == "processing" and recs[0]["result"] is None
-    storage.finish_evaluation(handle, "taro@x.com", EvaluationResult.from_dict(SAMPLE), "商談A")
+    storage.finish_evaluation("taro@x.com", "20260620_1_abc", EvaluationResult.from_dict(SAMPLE), "商談A")
     recs = storage.list_evaluations("taro@x.com")
     assert len(recs) == 1  # 同じレコードを更新（増えない）
     assert recs[0]["status"] == "done"
@@ -131,9 +131,30 @@ def test_knowledge_uses_sheets_when_configured(tmp_storage, monkeypatch):
 
 
 def test_background_job_lifecycle_error(tmp_storage):
-    handle = storage.start_evaluation("hana@x.com", "20260620_2_def", "商談B")
-    storage.fail_evaluation(handle, "hana@x.com", "無料枠の上限です", "商談B")
+    storage.start_evaluation("hana@x.com", "20260620_2_def", "商談B")
+    storage.fail_evaluation("hana@x.com", "20260620_2_def", "無料枠の上限です", "商談B")
     recs = storage.list_evaluations("hana@x.com")
     assert len(recs) == 1
     assert recs[0]["status"] == "error"
     assert recs[0]["error"] == "無料枠の上限です"
+
+
+def test_evaluations_use_sheets_when_configured(tmp_storage, monkeypatch):
+    """シート設定時：評価が Evaluations 側に保存され、各自のみ閲覧できること（モック）。"""
+    from services import sheets_knowledge
+
+    store = {"rows": []}
+    monkeypatch.setattr(sheets_knowledge, "configured", lambda: True)
+    monkeypatch.setattr(sheets_knowledge, "load_evaluations", lambda: list(store["rows"]))
+    monkeypatch.setattr(
+        sheets_knowledge, "save_evaluations", lambda items: store.__setitem__("rows", list(items))
+    )
+    storage.start_evaluation("a@x.com", "job_a", "商談A")
+    storage.finish_evaluation("a@x.com", "job_a", EvaluationResult.from_dict(SAMPLE), "商談A")
+    storage.start_evaluation("b@x.com", "job_b", "商談B")
+    # a は自分の1件のみ、b の評価は見えない
+    a_recs = storage.list_evaluations("a@x.com")
+    assert len(a_recs) == 1 and a_recs[0]["status"] == "done"
+    assert a_recs[0]["result"]["summary"] == SAMPLE["summary"]
+    assert all(r["user_email"] == "a@x.com" for r in a_recs)
+    assert len(store["rows"]) == 2  # 全体では2件（a完了・b処理中）

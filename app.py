@@ -121,7 +121,7 @@ def _friendly_gemini_error(exc: Exception) -> str:
 
 
 def _analyze_worker(
-    handle: str,
+    job_id: str,
     user_email: str,
     label: str,
     tmp_path: str | None = None,
@@ -134,24 +134,22 @@ def _analyze_worker(
     creds/file_id が渡された場合は、まずドライブから省メモリで録画をダウンロードする。
     画面を閉じてもこのスレッドは走り続け、完了したら履歴レコードを更新する。
     """
-    own_tmp: str | None = None
     try:
         if tmp_path is None:
             # ドライブから大容量録画をチャンク保存（メモリに全部載せない）
-            fd, own_tmp = tempfile.mkstemp(suffix=suffix)
+            fd, tmp_path = tempfile.mkstemp(suffix=suffix)
             os.close(fd)
-            google_drive.download_to_path(creds, file_id, own_tmp)
-            tmp_path = own_tmp
+            google_drive.download_to_path(creds, file_id, tmp_path)
         result = gemini_analyzer.analyze(
             tmp_path,
             storage.get_reference_talk(),
             storage.get_knowledge_base(),
         )
-        storage.finish_evaluation(handle, user_email, result, label)
+        storage.finish_evaluation(user_email, job_id, result, label)
         # 商談から抽出した弊社ナレッジを蓄積（使うほど評価が弊社仕様に賢くなる）
         storage.append_knowledge(result.knowledge)
     except Exception as exc:  # API/ダウンロードエラー等。失敗として履歴に残す。
-        storage.fail_evaluation(handle, user_email, _friendly_gemini_error(exc), label)
+        storage.fail_evaluation(user_email, job_id, _friendly_gemini_error(exc), label)
     finally:
         if tmp_path:
             Path(tmp_path).unlink(missing_ok=True)
@@ -160,10 +158,10 @@ def _analyze_worker(
 def _start_job(user: dict, label: str, **worker_kwargs) -> None:
     """背景ジョブを開始し、利用者に『閉じてOK』を伝える共通処理。"""
     job_id = time.strftime("%Y%m%d_%H%M%S") + "_" + uuid.uuid4().hex[:6]
-    handle = storage.start_evaluation(user["email"], job_id, label)
+    storage.start_evaluation(user["email"], job_id, label)
     thread = threading.Thread(
         target=_analyze_worker,
-        kwargs=dict(handle=handle, user_email=user["email"], label=label, **worker_kwargs),
+        kwargs=dict(job_id=job_id, user_email=user["email"], label=label, **worker_kwargs),
         daemon=True,
     )
     thread.start()
