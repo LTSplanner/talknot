@@ -29,7 +29,7 @@ try:
 except Exception:
     pass
 
-from auth import google_oauth, session  # noqa: E402
+from auth import google_oauth, persist, session  # noqa: E402
 from config import settings  # noqa: E402
 from core.models import EvaluationResult  # noqa: E402
 from services import drive_sa, gemini_analyzer, google_drive, storage  # noqa: E402
@@ -48,12 +48,25 @@ theme.inject_css()
 # 認証
 # --------------------------------------------------------------------------- #
 def resolve_user() -> dict | None:
-    """ログイン中ユーザーを返す。OAuth コールバックがあれば処理する。"""
+    """ログイン中ユーザーを返す。OAuth コールバックや保存Cookieがあれば処理する。"""
     if "user" in st.session_state:
         return st.session_state["user"]
+
+    # ブラウザに保存したログイン（暗号化Cookie）から復元（14日間は再ログイン不要）
+    saved = persist.load()
+    if saved and saved.get("user"):
+        st.session_state["user"] = saved["user"]
+        if saved.get("creds"):
+            st.session_state["credentials"] = saved["creds"]
+        return saved["user"]
+
     if session.oauth_configured():
         try:
-            return google_oauth.handle_callback()
+            user = google_oauth.handle_callback()
+            if user:
+                # 次回から再ログインを省くためCookieへ保存
+                persist.save(user, st.session_state.get("credentials"))
+            return user
         except google_oauth.DomainNotAllowedError as e:
             st.session_state["login_error"] = (
                 f"`{e.email}` は許可されていないドメインです。"

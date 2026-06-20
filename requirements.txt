@@ -12,3 +12,6 @@ google-genai>=0.3
 
 # 永続化（Cloud Run 等で評価履歴・模範トークを保存）
 google-cloud-storage>=2.16
+
+# ログイン保持（暗号化Cookie）
+extra-streamlit-components>=0.1.60

@@ -135,7 +135,8 @@ def sidebar(user: dict) -> None:
             st.markdown("🛡️ 管理者")
         st.divider()
         if st.button("ログアウト", use_container_width=True):
-            from auth import session
+            from auth import persist, session
 
+            persist.clear()  # 保存したログインCookieも消す
             session.logout()
             st.rerun()
