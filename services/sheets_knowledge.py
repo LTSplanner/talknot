@@ -21,10 +21,15 @@ from config import settings
 _HEADER = ["category", "point", "added_at"]
 
 
+def _cfg(name: str) -> str:
+    """settings から安全に取得（再デプロイ移行期に属性が無くても落ちないように）。"""
+    return getattr(settings, name, "") or ""
+
+
 def configured() -> bool:
     """スプレッドシート保存が使える設定がそろっているか。"""
-    return bool(settings.KNOWLEDGE_SHEET_ID) and bool(
-        settings.KNOWLEDGE_SA_JSON or settings.KNOWLEDGE_SA_FILE
+    return bool(_cfg("KNOWLEDGE_SHEET_ID")) and bool(
+        _cfg("KNOWLEDGE_SA_JSON") or _cfg("KNOWLEDGE_SA_FILE")
     )
 
 
@@ -33,20 +38,23 @@ def _service():
     from google.oauth2 import service_account
     from googleapiclient.discovery import build
 
-    if settings.KNOWLEDGE_SA_JSON:
-        info = json.loads(settings.KNOWLEDGE_SA_JSON)
+    scopes = getattr(settings, "SHEETS_SCOPES", None) or [
+        "https://www.googleapis.com/auth/spreadsheets"
+    ]
+    if _cfg("KNOWLEDGE_SA_JSON"):
+        info = json.loads(_cfg("KNOWLEDGE_SA_JSON"))
         creds = service_account.Credentials.from_service_account_info(
-            info, scopes=settings.SHEETS_SCOPES
+            info, scopes=scopes
         )
     else:
         creds = service_account.Credentials.from_service_account_file(
-            settings.KNOWLEDGE_SA_FILE, scopes=settings.SHEETS_SCOPES
+            _cfg("KNOWLEDGE_SA_FILE"), scopes=scopes
         )
     return build("sheets", "v4", credentials=creds, cache_discovery=False)
 
 
 def _tab() -> str:
-    return settings.KNOWLEDGE_SHEET_TAB
+    return _cfg("KNOWLEDGE_SHEET_TAB") or "Knowledge"
 
 
 def load() -> list[dict]:
@@ -56,7 +64,7 @@ def load() -> list[dict]:
     resp = (
         svc.spreadsheets()
         .values()
-        .get(spreadsheetId=settings.KNOWLEDGE_SHEET_ID, range=rng)
+        .get(spreadsheetId=_cfg("KNOWLEDGE_SHEET_ID"), range=rng)
         .execute()
     )
     rows = resp.get("values", [])
@@ -78,7 +86,7 @@ def load() -> list[dict]:
 def save(items: list[dict]) -> None:
     """シートを全置換で書き戻す（件数が少ないため毎回まるごと更新）。"""
     svc = _service()
-    sheet_id = settings.KNOWLEDGE_SHEET_ID
+    sheet_id = _cfg("KNOWLEDGE_SHEET_ID")
     # 既存データ（ヘッダー以下）を消してから書き直す。
     svc.spreadsheets().values().clear(
         spreadsheetId=sheet_id, range=f"{_tab()}!A:C"
