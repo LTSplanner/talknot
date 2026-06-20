@@ -52,7 +52,12 @@ def analyze(video_path: str, reference_talk: str | None = None) -> EvaluationRes
     response = client.models.generate_content(
         model=settings.GEMINI_MODEL,
         contents=[uploaded, prompt],
-        config=types.GenerateContentConfig(response_mime_type="application/json"),
+        config=types.GenerateContentConfig(
+            response_mime_type="application/json",
+            # 動画は声・間が読めれば十分。映像解像度を下げてトークン消費を大幅削減し、
+            # 長尺の商談録画でも上限/無料枠に当たりにくくする（軽量化重視）。
+            media_resolution=types.MediaResolution.MEDIA_RESOLUTION_LOW,
+        ),
     )
 
     # 解析後はアップロード済みファイルを後始末（失敗しても致命的ではない）

@@ -97,8 +97,31 @@ def render_login() -> None:
 # --------------------------------------------------------------------------- #
 # 評価フロー
 # --------------------------------------------------------------------------- #
+def _friendly_gemini_error(exc: Exception) -> str:
+    """Gemini API のエラーを、利用者向けの日本語メッセージに翻訳する。"""
+    code = getattr(exc, "code", None)
+    if code == 429:
+        return (
+            "AI の無料利用枠（短時間あたりの上限）に達しました。"
+            "1〜2分ほど待ってから、もう一度お試しください。"
+            "長い動画は枠を多く消費します。商談の山場だけに短く切ると安定します。"
+        )
+    if code == 400:
+        return (
+            "動画が長すぎる・重すぎる可能性があります（AI が処理できる上限を超過）。"
+            "動画を数分程度に短く切る、または短いクリップでお試しください。"
+        )
+    if code == 403:
+        return "AI の利用権限エラーです（APIキー設定）。管理者にご連絡ください。"
+    msg = getattr(exc, "message", "") or str(exc)
+    return f"AI 解析でエラーが発生しました：{msg}"
+
+
 def _run_analysis(video_bytes: bytes, suffix: str, user: dict, label: str) -> None:
-    """動画 bytes を一時ファイルに保存して Gemini 解析 → 保存 → session 格納。"""
+    """動画 bytes を一時ファイルに保存して Gemini 解析 → 保存 → session 格納。
+
+    解析に失敗してもアプリ全体は落とさず、原因を画面に表示する。
+    """
     with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
         tmp.write(video_bytes)
         tmp_path = tmp.name
@@ -107,6 +130,9 @@ def _run_analysis(video_bytes: bytes, suffix: str, user: dict, label: str) -> No
             result = gemini_analyzer.analyze(tmp_path, storage.get_reference_talk())
         storage.save_evaluation(user["email"], result, label)
         st.session_state["last_result"] = result
+    except Exception as exc:  # API エラー等。アプリを落とさず利用者に伝える。
+        st.error(_friendly_gemini_error(exc))
+        st.caption(f"（技術詳細：{type(exc).__name__}: {exc}）")
     finally:
         Path(tmp_path).unlink(missing_ok=True)
 
