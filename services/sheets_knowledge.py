@@ -163,6 +163,7 @@ def save(items: list[dict]) -> None:
     """シートを全置換で書き戻す（件数が少ないため毎回まるごと更新）。"""
     svc = _service()
     sheet_id = _cfg("KNOWLEDGE_SHEET_ID")
+    _ensure_tab(svc, _tab())  # タブが無ければ作る（空のシートを渡すだけでOKにする）
     # 既存データ（ヘッダー以下）を消してから書き直す。
     svc.spreadsheets().values().clear(
         spreadsheetId=sheet_id, range=f"{_tab()}!A:C"
