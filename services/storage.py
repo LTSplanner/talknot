@@ -114,7 +114,23 @@ def _knowledge_path() -> Path:
     return settings.DATA_DIR / _KNOWLEDGE_NAME
 
 
+def _use_sheets() -> bool:
+    """弊社ナレッジを Google スプレッドシートに永続保存する設定か。"""
+    from services import sheets_knowledge
+
+    return sheets_knowledge.configured()
+
+
 def _load_knowledge() -> list[dict]:
+    # 最優先：共有ドライブのスプレッドシート（再起動でも消えない弊社の頭脳）
+    if _use_sheets():
+        from services import sheets_knowledge
+
+        try:
+            return sheets_knowledge.load()
+        except Exception:
+            # シート障害時も評価自体は止めない（知識なしで続行）
+            return []
     if _use_gcs():
         blob = _bucket().blob(_gcs_path(_KNOWLEDGE_NAME))
         if not blob.exists():
@@ -133,6 +149,11 @@ def _load_knowledge() -> list[dict]:
 
 
 def _save_knowledge(items: list[dict]) -> None:
+    if _use_sheets():
+        from services import sheets_knowledge
+
+        sheets_knowledge.save(items)
+        return
     payload = json.dumps(items, ensure_ascii=False, indent=2)
     if _use_gcs():
         _bucket().blob(_gcs_path(_KNOWLEDGE_NAME)).upload_from_string(

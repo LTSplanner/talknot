@@ -92,6 +92,23 @@ def test_background_job_lifecycle_done(tmp_storage):
     assert recs[0]["result"]["summary"] == SAMPLE["summary"]
 
 
+def test_knowledge_uses_sheets_when_configured(tmp_storage, monkeypatch):
+    """シート設定時は、保存/読込がスプレッドシート側へ振り向けられること（ネット非依存・モック）。"""
+    from services import sheets_knowledge
+
+    store: dict = {"rows": []}
+    monkeypatch.setattr(sheets_knowledge, "configured", lambda: True)
+    monkeypatch.setattr(sheets_knowledge, "load", lambda: list(store["rows"]))
+    monkeypatch.setattr(
+        sheets_knowledge, "save", lambda items: store.__setitem__("rows", list(items))
+    )
+
+    added = storage.append_knowledge([KnowledgeItem("rule", "契約前に資金計画を共有")])
+    assert added == 1
+    assert store["rows"] and store["rows"][0]["point"] == "契約前に資金計画を共有"
+    assert "資金計画" in storage.get_knowledge_base()
+
+
 def test_background_job_lifecycle_error(tmp_storage):
     handle = storage.start_evaluation("hana@x.com", "20260620_2_def", "商談B")
     storage.fail_evaluation(handle, "hana@x.com", "無料枠の上限です", "商談B")

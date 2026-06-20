@@ -86,6 +86,19 @@ REFERENCE_ACCOUNT = os.getenv(
 # サービスアカウントに委任する Drive スコープ（読み取り専用）。
 DRIVE_SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
 
+# --- 弊社ナレッジの永続保存（共有ドライブのスプレッドシート）---
+# 専用AIの頭脳（社内ルール・商品知識・営業トーク）を、再起動でも消えないよう
+# Google スプレッドシートに保存する。未設定ならローカルファイル（DATA_DIR）に保存。
+#   KNOWLEDGE_SHEET_ID … 共有ドライブに置いたスプレッドシートの ID
+#   KNOWLEDGE_SA_JSON  … 書き込み用サービスアカウント鍵の JSON 文字列（Secrets 向け）
+#   KNOWLEDGE_SA_FILE  … 同 鍵ファイルのパス（ローカル開発向け）
+# 鍵は「このシート1枚だけ」共有した最小権限の専用アカウントを推奨（録画用の鍵は使わない）。
+KNOWLEDGE_SHEET_ID = os.getenv("KNOWLEDGE_SHEET_ID", "")
+KNOWLEDGE_SA_JSON = os.getenv("KNOWLEDGE_SA_JSON", "")
+KNOWLEDGE_SA_FILE = os.getenv("KNOWLEDGE_SA_FILE", "")
+KNOWLEDGE_SHEET_TAB = os.getenv("KNOWLEDGE_SHEET_TAB", "Knowledge")
+SHEETS_SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
+
 # --- Gemini ---
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 # 動画・音声解析に対応したモデル。.env で差し替え可能。

@@ -398,6 +398,12 @@ def render_knowledge_tab(user: dict) -> None:
         "ここに蓄積します。次回からの評価はこの知識を前提に、弊社仕様で行われます。"
         "（個人情報は含めません）"
     )
+    from services import sheets_knowledge
+    if sheets_knowledge.configured():
+        st.caption("💾 共有ドライブのスプレッドシートに永続保存されています（再起動でも消えません）。")
+    else:
+        st.caption("⚠️ 現在はアプリ内に一時保存です（再起動で消える可能性）。共有ドライブ保存は docs/SETUP_KNOWLEDGE_SHEET.md を設定すると有効になります。")
+
     items = storage.get_knowledge_items()
     if not items:
         st.caption("まだ蓄積された知識はありません。商談を評価すると貯まっていきます。")
