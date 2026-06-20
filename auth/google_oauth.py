@@ -58,7 +58,9 @@ def login_button() -> None:
     auth_url, state = flow.authorization_url(
         access_type="offline",
         include_granted_scopes="true",
-        prompt="consent",
+        # consent（承認画面）を毎回は出さない。初回に許可済みなら以後はスキップされ、
+        # アカウント選択だけで入れる（承認の二度手間を無くす）。
+        prompt="select_account",
         # hd でドメインを優先表示（最終判定は handle_callback で行う）
         hd=settings.ALLOWED_DOMAINS[0] if settings.ALLOWED_DOMAINS else None,
     )
