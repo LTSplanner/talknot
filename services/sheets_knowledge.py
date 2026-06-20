@@ -57,6 +57,82 @@ def _tab() -> str:
     return _cfg("KNOWLEDGE_SHEET_TAB") or "Knowledge"
 
 
+_REFERENCE_TAB = "Reference"
+_REFERENCE_HEADER = ["id", "label", "status", "text", "added_at"]
+
+
+def _ensure_tab(svc, title: str) -> None:
+    """シートに指定タブが無ければ作る。"""
+    sid = _cfg("KNOWLEDGE_SHEET_ID")
+    meta = svc.spreadsheets().get(spreadsheetId=sid).execute()
+    titles = [s["properties"]["title"] for s in meta.get("sheets", [])]
+    if title not in titles:
+        svc.spreadsheets().batchUpdate(
+            spreadsheetId=sid,
+            body={"requests": [{"addSheet": {"properties": {"title": title}}}]},
+        ).execute()
+
+
+def load_reference() -> list[dict]:
+    """Reference タブから模範トークを読む（id/label/status/text/added_at）。"""
+    svc = _service()
+    try:
+        resp = (
+            svc.spreadsheets()
+            .values()
+            .get(
+                spreadsheetId=_cfg("KNOWLEDGE_SHEET_ID"),
+                range=f"{_REFERENCE_TAB}!A2:E",
+            )
+            .execute()
+        )
+    except Exception:
+        return []
+    items: list[dict] = []
+    for row in resp.get("values", []):
+        def cell(i: int) -> str:
+            return (row[i] if len(row) > i else "").strip()
+
+        text = cell(3)
+        item = {
+            "id": cell(0),
+            "label": cell(1),
+            "status": cell(2) or "done",
+            "text": text,
+        }
+        if cell(4):
+            item["added_at"] = cell(4)
+        items.append(item)
+    return items
+
+
+def save_reference(items: list[dict]) -> None:
+    """Reference タブを全置換で書き戻す（タブが無ければ作る）。"""
+    svc = _service()
+    _ensure_tab(svc, _REFERENCE_TAB)
+    sid = _cfg("KNOWLEDGE_SHEET_ID")
+    svc.spreadsheets().values().clear(
+        spreadsheetId=sid, range=f"{_REFERENCE_TAB}!A:E"
+    ).execute()
+    now = time.strftime("%Y-%m-%d %H:%M:%S")
+    values = [_REFERENCE_HEADER] + [
+        [
+            it.get("id", ""),
+            it.get("label", ""),
+            it.get("status", "done"),
+            it.get("text", ""),
+            it.get("added_at", now),
+        ]
+        for it in items
+    ]
+    svc.spreadsheets().values().update(
+        spreadsheetId=sid,
+        range=f"{_REFERENCE_TAB}!A1",
+        valueInputOption="RAW",
+        body={"values": values},
+    ).execute()
+
+
 def load() -> list[dict]:
     """シート全体を読み、知識項目の dict リストを返す。"""
     svc = _service()

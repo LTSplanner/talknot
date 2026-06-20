@@ -16,9 +16,6 @@ from pathlib import Path
 from config import settings
 from core.models import EvaluationResult, KnowledgeItem
 
-# 模範トークの基準テキストのキー（GCSオブジェクト名 / ローカルファイル名）。
-_REFERENCE_TEXT_NAME = "reference.txt"
-
 # 弊社ナレッジ（蓄積知識）の保存名と上限。
 _KNOWLEDGE_NAME = "knowledge.json"
 # 知識項目の上限。超えたら古いものから間引き、毎回の評価コストと容量を一定に保つ。
@@ -47,57 +44,142 @@ def _gcs_path(*parts: str) -> str:
 # --------------------------------------------------------------------------- #
 # ローカル用ヘルパ
 # --------------------------------------------------------------------------- #
-def _reference_text_path() -> Path:
-    # settings の値を実行時に参照（テストで差し替え可能にするため）
-    return settings.REFERENCE_TALKS_DIR / _REFERENCE_TEXT_NAME
-
-
 def _ensure_dirs() -> None:
     settings.REFERENCE_TALKS_DIR.mkdir(parents=True, exist_ok=True)
     settings.EVALUATIONS_DIR.mkdir(parents=True, exist_ok=True)
 
 
 # --------------------------------------------------------------------------- #
-# 模範トーク
+# 模範トーク（複数を蓄積し、評価の🎯模範トーク視点の基準にする）
 # --------------------------------------------------------------------------- #
-def save_reference_talk(content: bytes | str, filename: str | None = None) -> str:
-    """模範トークを保存する。
+_REFERENCE_JSON_NAME = "reference.json"
+# 模範トークの保持上限と、評価プロンプトへ渡す合計文字数の上限（トークン暴発防止）。
+_REFERENCE_MAX_ITEMS = 20
+_REFERENCE_CHAR_BUDGET = 12000
 
-    テキストは基準テキストとして、動画/ファイルは原本として保存する。
-    保存先のパス（ローカルパス or GCS オブジェクト名）を文字列で返す。
-    """
+
+def _reference_json_path() -> Path:
+    return settings.DATA_DIR / _REFERENCE_JSON_NAME
+
+
+def _load_reference() -> list[dict]:
+    # 永続化先：シート → GCS → ローカル（弊社ナレッジと同じ優先順）
+    if _use_sheets():
+        from services import sheets_knowledge
+
+        try:
+            return sheets_knowledge.load_reference()
+        except Exception:
+            return []
     if _use_gcs():
-        bucket = _bucket()
-        if isinstance(content, str):
-            name = _gcs_path("reference_talks", _REFERENCE_TEXT_NAME)
-            bucket.blob(name).upload_from_string(content, content_type="text/plain")
-            return name
-        name = _gcs_path("reference_talks", filename or "reference_upload")
-        bucket.blob(name).upload_from_string(content)
-        return name
+        blob = _bucket().blob(_gcs_path(_REFERENCE_JSON_NAME))
+        if not blob.exists():
+            return []
+        try:
+            return json.loads(blob.download_as_text())
+        except (json.JSONDecodeError, OSError):
+            return []
+    path = _reference_json_path()
+    if not path.exists():
+        return []
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return []
 
-    _ensure_dirs()
-    if isinstance(content, str):
-        path = _reference_text_path()
-        path.write_text(content, encoding="utf-8")
-        return str(path)
-    target = settings.REFERENCE_TALKS_DIR / (filename or "reference_upload")
-    target.write_bytes(content)
-    return str(target)
+
+def _save_reference(items: list[dict]) -> None:
+    if _use_sheets():
+        from services import sheets_knowledge
+
+        sheets_knowledge.save_reference(items)
+        return
+    payload = json.dumps(items, ensure_ascii=False, indent=2)
+    if _use_gcs():
+        _bucket().blob(_gcs_path(_REFERENCE_JSON_NAME)).upload_from_string(
+            payload, content_type="application/json"
+        )
+        return
+    settings.DATA_DIR.mkdir(parents=True, exist_ok=True)
+    _reference_json_path().write_text(payload, encoding="utf-8")
+
+
+def add_reference_talk(text: str, label: str = "") -> None:
+    """手入力など、完成済みの模範トークテキストを1件 蓄積する。"""
+    text = (text or "").strip()
+    if not text:
+        return
+    items = _load_reference()
+    items.append({
+        "id": "manual_" + time.strftime("%Y%m%d%H%M%S"),
+        "label": label,
+        "status": "done",
+        "text": text,
+        "added_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+    })
+    _save_reference(items[-_REFERENCE_MAX_ITEMS:])
+
+
+def start_reference_job(job_id: str, label: str = "") -> None:
+    """ドライブ録画の文字起こし開始時に『処理中』の枠を1件作る。"""
+    items = _load_reference()
+    items.append({
+        "id": job_id,
+        "label": label,
+        "status": "processing",
+        "text": "",
+        "added_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+    })
+    _save_reference(items[-_REFERENCE_MAX_ITEMS:])
+
+
+def _update_reference(job_id: str, **changes) -> None:
+    items = _load_reference()
+    for it in items:
+        if it.get("id") == job_id:
+            it.update(changes)
+            break
+    _save_reference(items)
+
+
+def finish_reference(job_id: str, text: str) -> None:
+    _update_reference(job_id, status="done", text=(text or "").strip())
+
+
+def fail_reference(job_id: str, error: str) -> None:
+    _update_reference(job_id, status="error", error=error)
+
+
+def list_reference_talks() -> list[dict]:
+    """蓄積された模範トーク（処理中・失敗も含む）を返す。"""
+    return _load_reference()
+
+
+def delete_reference_talk(job_id: str) -> None:
+    items = [it for it in _load_reference() if it.get("id") != job_id]
+    _save_reference(items)
+
+
+def clear_reference_talks() -> None:
+    _save_reference([])
 
 
 def get_reference_talk() -> str | None:
-    """評価時にプロンプトへ渡す基準テキストを返す（無ければ None）。"""
-    if _use_gcs():
-        blob = _bucket().blob(_gcs_path("reference_talks", _REFERENCE_TEXT_NAME))
-        if blob.exists():
-            return blob.download_as_text()
+    """評価プロンプトへ渡す模範トーク基準（複数を結合、合計文字数で上限）。"""
+    items = [it for it in _load_reference() if it.get("status", "done") == "done" and it.get("text")]
+    if not items:
         return None
-
-    path = _reference_text_path()
-    if path.exists():
-        return path.read_text(encoding="utf-8")
-    return None
+    parts: list[str] = []
+    total = 0
+    # 新しいものを優先して合計文字数の上限まで詰める
+    for it in reversed(items):
+        head = f"■ 模範トーク{(' [' + it['label'] + ']') if it.get('label') else ''}"
+        block = f"{head}\n{it['text']}"
+        if parts and total + len(block) > _REFERENCE_CHAR_BUDGET:
+            break
+        parts.append(block)
+        total += len(block)
+    return "\n\n".join(parts)
 
 
 # --------------------------------------------------------------------------- #

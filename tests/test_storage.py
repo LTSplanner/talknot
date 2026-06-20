@@ -21,16 +21,37 @@ def tmp_storage(tmp_path, monkeypatch):
     return tmp_path
 
 
-def test_reference_text_roundtrip(tmp_storage):
+def test_reference_accumulates_and_concatenates(tmp_storage):
     assert storage.get_reference_talk() is None
-    storage.save_reference_talk("模範トークの基準テキスト")
-    assert storage.get_reference_talk() == "模範トークの基準テキスト"
+    storage.add_reference_talk("一件目の模範トーク", label="A")
+    storage.add_reference_talk("二件目の模範トーク", label="B")
+    base = storage.get_reference_talk()
+    assert "一件目の模範トーク" in base and "二件目の模範トーク" in base
+    assert len(storage.list_reference_talks()) == 2
 
 
-def test_reference_binary_saved(tmp_storage):
-    path = Path(storage.save_reference_talk(b"\x00\x01video", "ref.mp4"))
-    assert path.exists()
-    assert path.read_bytes() == b"\x00\x01video"
+def test_reference_job_lifecycle_and_get_skips_unfinished(tmp_storage):
+    storage.start_reference_job("ref_1", "商談動画")
+    # 処理中はプロンプト用テキストに含めない
+    assert storage.get_reference_talk() is None
+    storage.finish_reference("ref_1", "文字起こし結果のトーク")
+    assert "文字起こし結果のトーク" in storage.get_reference_talk()
+    # 失敗ジョブも基準には混ぜない
+    storage.start_reference_job("ref_2", "壊れた動画")
+    storage.fail_reference("ref_2", "上限超過")
+    items = {it["id"]: it for it in storage.list_reference_talks()}
+    assert items["ref_2"]["status"] == "error"
+    assert "文字起こし結果のトーク" in storage.get_reference_talk()
+
+
+def test_reference_delete_and_clear(tmp_storage):
+    storage.add_reference_talk("消す対象", label="X")
+    rid = storage.list_reference_talks()[0]["id"]
+    storage.delete_reference_talk(rid)
+    assert storage.list_reference_talks() == []
+    storage.add_reference_talk("また追加")
+    storage.clear_reference_talks()
+    assert storage.list_reference_talks() == []
 
 
 def test_evaluation_saved_and_listed(tmp_storage):

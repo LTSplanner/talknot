@@ -41,6 +41,20 @@ def _wait_until_active(client: genai.Client, file):
     return file
 
 
+def _media_part(uploaded):
+    """動画は低fpsでフレームを間引いた Part にし、音声などはそのまま渡す。
+
+    身振り手振りは残しつつトークンを抑え、2〜3時間の長尺でも文脈上限に収まりやすくする。
+    """
+    mime = getattr(uploaded, "mime_type", "") or ""
+    if mime.startswith("video/"):
+        return types.Part(
+            file_data=types.FileData(file_uri=uploaded.uri, mime_type=mime),
+            video_metadata=types.VideoMetadata(fps=settings.GEMINI_VIDEO_FPS),
+        )
+    return uploaded
+
+
 def analyze(
     video_path: str,
     reference_talk: str | None = None,
@@ -54,20 +68,9 @@ def analyze(
 
     prompt = prompts.build_evaluation_prompt(reference_talk, knowledge_base)
 
-    mime = getattr(uploaded, "mime_type", "") or ""
-    if mime.startswith("video/"):
-        # 動画はフレームを間引いて（低fps）トークンを抑える。身振り手振りは残しつつ
-        # 2〜3時間でも文脈上限に収まりやすくする。
-        media_part = types.Part(
-            file_data=types.FileData(file_uri=uploaded.uri, mime_type=mime),
-            video_metadata=types.VideoMetadata(fps=settings.GEMINI_VIDEO_FPS),
-        )
-    else:
-        media_part = uploaded  # 音声などはそのまま
-
     response = client.models.generate_content(
         model=settings.GEMINI_MODEL,
-        contents=[media_part, prompt],
+        contents=[_media_part(uploaded), prompt],
         config=types.GenerateContentConfig(
             response_mime_type="application/json",
             # 動画は声・間が読めれば十分。映像解像度を下げてトークン消費を大幅削減し、
@@ -106,7 +109,7 @@ def transcribe_reference(video_path: str) -> str:
     try:
         response = client.models.generate_content(
             model=settings.GEMINI_MODEL,
-            contents=[uploaded, _REFERENCE_TRANSCRIBE_PROMPT],
+            contents=[_media_part(uploaded), _REFERENCE_TRANSCRIBE_PROMPT],
             config=types.GenerateContentConfig(
                 media_resolution=types.MediaResolution.MEDIA_RESOLUTION_LOW,
             ),

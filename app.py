@@ -280,59 +280,113 @@ def _render_drive_picker(creds, user: dict) -> None:
         _start_drive_job(creds, file_id, user, labels[file_id])
 
 
-def _register_reference_from_video(data: bytes, suffix: str, name: str) -> None:
-    """模範トーク動画を文字起こしして『テキスト基準』として保存する（動画は保存しない＝容量対策）。"""
-    if suffix.lower() == ".txt":
-        storage.save_reference_talk(data.decode("utf-8", errors="ignore"))
-        return
-    with tempfile.NamedTemporaryFile(suffix=suffix or ".mp4", delete=False) as tmp:
-        tmp.write(data)
-        tmp_path = tmp.name
+def _reference_worker(
+    job_id: str, label: str, tmp_path: str | None = None, creds=None, file_id: str | None = None
+) -> None:
+    """模範トーク動画を背景で文字起こしして蓄積する（st.* は使わない）。
+
+    creds/file_id 指定時はドライブから省メモリでダウンロードしてから処理する。
+    """
+    own_tmp: str | None = None
     try:
-        with st.spinner("模範トークをAIが文字起こし中…"):
-            transcript = gemini_analyzer.transcribe_reference(tmp_path)
+        if tmp_path is None:
+            fd, own_tmp = tempfile.mkstemp(suffix=".mp4")
+            os.close(fd)
+            google_drive.download_to_path(creds, file_id, own_tmp)
+            tmp_path = own_tmp
+        transcript = gemini_analyzer.transcribe_reference(tmp_path)
         if transcript:
-            storage.save_reference_talk(transcript)
+            storage.finish_reference(job_id, transcript)
         else:
-            st.warning("文字起こし結果が空でした。別の動画でお試しください。")
+            storage.fail_reference(job_id, "文字起こし結果が空でした。")
     except Exception as exc:
-        st.error(_friendly_gemini_error(exc))
+        storage.fail_reference(job_id, _friendly_gemini_error(exc))
     finally:
-        Path(tmp_path).unlink(missing_ok=True)
+        if tmp_path:
+            Path(tmp_path).unlink(missing_ok=True)
+
+
+def _start_reference_job(label: str, **worker_kwargs) -> None:
+    """模範トークの文字起こしを背景で開始する（押したら閉じてOK）。"""
+    job_id = "ref_" + time.strftime("%Y%m%d_%H%M%S") + "_" + uuid.uuid4().hex[:6]
+    storage.start_reference_job(job_id, label)
+    threading.Thread(
+        target=_reference_worker,
+        kwargs=dict(job_id=job_id, label=label, **worker_kwargs),
+        daemon=True,
+    ).start()
+    st.success("✅ 模範トークの文字起こしを開始しました。**閉じてOK**。完了すると下の一覧に追加されます。")
 
 
 def render_reference_tab(user: dict) -> None:
     st.markdown("##### 模範トーク")
-    st.write("全社員が共通の基準で評価されるよう、管理者が模範トークを登録します。")
+    st.write(
+        "複数の模範商談を登録すると、すべてが 🎯模範トーク視点の基準として積み重なります。"
+        "動画は保存せず、文字起こしテキストだけを蓄積します（容量対策）。"
+    )
 
-    current = storage.get_reference_talk()
-    if current:
-        st.caption("登録済みの基準テキスト：")
-        st.code(current[:500] + ("…" if len(current) > 500 else ""))
+    _render_reference_list(user)
 
     if not settings.is_admin(user.get("email")):
         st.caption("登録は管理者のみが行えます。")
         return
 
-    text = st.text_area("模範トーク（テキスト基準）", value=current or "", height=160)
-    file = st.file_uploader("模範トーク動画（任意）", type=["mp4", "mov", "txt"])
-    if st.button("模範トークを登録"):
+    st.divider()
+    st.markdown("###### 模範トークを追加")
+    text = st.text_area("テキストで追加（任意）", height=120, key="ref_text")
+    file = st.file_uploader("動画/テキストで追加（任意）", type=["mp4", "mov", "txt"], key="ref_upload")
+    if st.button("追加する", key="ref_add"):
+        did = False
         if text.strip():
-            storage.save_reference_talk(text)
+            storage.add_reference_talk(text, label="手入力")
+            did = True
         if file is not None:
-            _register_reference_from_video(file.getvalue(), Path(file.name).suffix, file.name)
-        if text.strip() or file is not None:
-            st.success("模範トークを登録しました。")
+            if Path(file.name).suffix.lower() == ".txt":
+                storage.add_reference_talk(file.getvalue().decode("utf-8", errors="ignore"), label=file.name)
+            else:
+                with tempfile.NamedTemporaryFile(suffix=Path(file.name).suffix or ".mp4", delete=False) as tmp:
+                    tmp.write(file.getvalue())
+                    tmp_path = tmp.name
+                _start_reference_job(file.name, tmp_path=tmp_path)
+            did = True
+        if did:
+            st.rerun()
 
     # 基準アカウント（kkyoya@ / hkumada@ など）のドライブから模範動画を選んで登録する。
     if drive_sa.configured() and settings.REFERENCE_ACCOUNTS:
         st.divider()
-        st.markdown("###### 基準アカウントのドライブから登録")
+        st.markdown("###### 基準アカウントのドライブから追加")
         _render_reference_drive_picker()
 
 
+def _render_reference_list(user: dict) -> None:
+    items = storage.list_reference_talks()
+    if not items:
+        st.caption("まだ模範トークがありません。")
+        return
+    if any(it.get("status") == "processing" for it in items):
+        if st.button("🔄 最新の状態に更新", key="ref_refresh"):
+            st.rerun()
+    is_admin = settings.is_admin(user.get("email"))
+    for it in reversed(items):
+        status = it.get("status", "done")
+        badge = _STATUS_BADGE.get(status, "✅ 完了")
+        title = it.get("label") or it.get("added_at", "")
+        with st.expander(f"{badge}　{title}"):
+            if status == "processing":
+                st.caption("AI が文字起こし中です。少し待って更新してください。")
+            elif status == "error":
+                st.error(it.get("error", "文字起こしに失敗しました。"))
+            else:
+                body = it.get("text", "")
+                st.code(body[:800] + ("…" if len(body) > 800 else ""))
+            if is_admin and st.button("削除", key=f"ref_del_{it.get('id')}"):
+                storage.delete_reference_talk(it.get("id"))
+                st.rerun()
+
+
 def _render_reference_drive_picker() -> None:
-    """模範トークの基準アカウントのドライブから動画を選び、模範トークとして登録する。"""
+    """基準アカウントのドライブから動画を選び、模範トークとして背景で文字起こし・蓄積する。"""
     account = st.selectbox(
         "基準アカウント", settings.REFERENCE_ACCOUNTS, key="ref_account"
     )
@@ -363,12 +417,9 @@ def _render_reference_drive_picker() -> None:
         format_func=lambda i: labels[i],
         key="ref_file",
     )
-    if st.button("この動画を模範トークとして登録", key="ref_register"):
-        with st.spinner("ドライブから動画を取得中…"):
-            video_bytes = google_drive.download_file(creds, file_id)
+    if st.button("この動画を模範トークとして追加", key="ref_register"):
         name = labels[file_id].split("　")[0]
-        _register_reference_from_video(video_bytes, ".mp4", name)
-        st.success(f"{account} の「{name}」を模範トークとして登録しました。")
+        _start_reference_job(f"{account}｜{name}", creds=creds, file_id=file_id)
 
 
 _STATUS_BADGE = {
