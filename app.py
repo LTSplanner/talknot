@@ -333,30 +333,73 @@ def render_reference_tab(user: dict) -> None:
 
     st.divider()
     st.markdown("###### 模範トークを追加")
-    text = st.text_area("テキストで追加（任意）", height=120, key="ref_text")
-    file = st.file_uploader("動画/テキストで追加（任意）", type=["mp4", "mov", "txt"], key="ref_upload")
-    if st.button("追加する", key="ref_add"):
-        did = False
-        if text.strip():
+
+    sources = ["自分のドライブから選択", "テキストを直接入力", "PC からアップロード"]
+    # サービスアカウント設定済みなら、基準アカウント（kkyoya@等）の代理取得も選べる。
+    if drive_sa.configured() and settings.REFERENCE_ACCOUNTS:
+        sources.append("基準アカウントのドライブから（代理）")
+    source = st.radio("追加方法", sources, horizontal=True, key="ref_source")
+
+    if source.startswith("自分のドライブ"):
+        creds = session.get_credentials()
+        if not creds:
+            st.info("ドライブ連携には Google ログインが必要です（デモログインでは利用不可）。")
+        else:
+            _render_reference_own_drive_picker(creds)
+    elif source.startswith("テキスト"):
+        text = st.text_area("模範トーク（テキスト）", height=140, key="ref_text")
+        if st.button("追加する", key="ref_add_text") and text.strip():
             storage.add_reference_talk(text, label="手入力")
-            did = True
-        if file is not None:
+            st.rerun()
+    elif source.startswith("PC"):
+        file = st.file_uploader("動画/テキスト", type=["mp4", "mov", "txt"], key="ref_upload")
+        if file is not None and st.button("追加する", key="ref_add_file"):
             if Path(file.name).suffix.lower() == ".txt":
-                storage.add_reference_talk(file.getvalue().decode("utf-8", errors="ignore"), label=file.name)
+                storage.add_reference_talk(
+                    file.getvalue().decode("utf-8", errors="ignore"), label=file.name
+                )
+                st.rerun()
             else:
-                with tempfile.NamedTemporaryFile(suffix=Path(file.name).suffix or ".mp4", delete=False) as tmp:
+                with tempfile.NamedTemporaryFile(
+                    suffix=Path(file.name).suffix or ".mp4", delete=False
+                ) as tmp:
                     tmp.write(file.getvalue())
                     tmp_path = tmp.name
                 _start_reference_job(file.name, tmp_path=tmp_path)
-            did = True
-        if did:
-            st.rerun()
-
-    # 基準アカウント（kkyoya@ / hkumada@ など）のドライブから模範動画を選んで登録する。
-    if drive_sa.configured() and settings.REFERENCE_ACCOUNTS:
-        st.divider()
-        st.markdown("###### 基準アカウントのドライブから追加")
+    else:
         _render_reference_drive_picker()
+
+
+def _render_reference_own_drive_picker(creds) -> None:
+    """ログイン中ユーザー自身のドライブから模範動画を選び、背景で文字起こし・蓄積する。"""
+    keyword = st.text_input(
+        "ファイル名で絞り込み（任意）",
+        placeholder="例: 商談 / Meet / 顧客名",
+        key="refown_keyword",
+    )
+    try:
+        files = google_drive.list_videos(creds, name_contains=keyword.strip() or None)
+    except Exception as e:
+        st.error(f"ドライブの読み込みに失敗しました：{e}")
+        return
+    if not files:
+        st.info(
+            "アクセスできる動画が見つかりませんでした。"
+            "あなたが所有 or 共有された動画、参加中の共有ドライブの動画が対象です。"
+        )
+        return
+    labels = {}
+    for f in files:
+        date = f.get("createdTime", "")[:10]
+        labels[f["id"]] = f"{f['name']}　[{date}]"
+    file_id = st.selectbox(
+        "模範にする動画を選択",
+        options=list(labels),
+        format_func=lambda i: labels[i],
+        key="refown_file",
+    )
+    if st.button("この動画を模範トークとして追加", key="refown_register"):
+        _start_reference_job(labels[file_id].split("　")[0], creds=creds, file_id=file_id)
 
 
 def _render_reference_list(user: dict) -> None:
