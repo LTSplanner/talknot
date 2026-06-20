@@ -80,7 +80,7 @@ def list_meet_recordings(credentials: Credentials, folder_name: str = "Meet") ->
 
 
 def download_file(credentials: Credentials, file_id: str) -> bytes:
-    """指定 file_id の動画をメモリ上に取得して bytes で返す。"""
+    """指定 file_id の動画をメモリ上に取得して bytes で返す（小さいファイル向け）。"""
     service = _service(credentials)
     request = service.files().get_media(fileId=file_id, supportsAllDrives=True)
     buffer = io.BytesIO()
@@ -89,3 +89,19 @@ def download_file(credentials: Credentials, file_id: str) -> bytes:
     while not done:
         _, done = downloader.next_chunk()
     return buffer.getvalue()
+
+
+def download_to_path(
+    credentials: Credentials, file_id: str, dest_path: str, chunk_mb: int = 16
+) -> None:
+    """指定 file_id をファイルへ逐次（チャンク）保存する。
+
+    メモリに全体を載せないため、2〜3時間の大容量録画でも省メモリで取得できる。
+    """
+    service = _service(credentials)
+    request = service.files().get_media(fileId=file_id, supportsAllDrives=True)
+    with open(dest_path, "wb") as fh:
+        downloader = MediaIoBaseDownload(fh, request, chunksize=chunk_mb * 1024 * 1024)
+        done = False
+        while not done:
+            _, done = downloader.next_chunk()

@@ -121,13 +121,27 @@ def _friendly_gemini_error(exc: Exception) -> str:
 
 
 def _analyze_worker(
-    handle: str, tmp_path: str, user_email: str, label: str
+    handle: str,
+    user_email: str,
+    label: str,
+    tmp_path: str | None = None,
+    creds=None,
+    file_id: str | None = None,
+    suffix: str = ".mp4",
 ) -> None:
     """サーバーの裏で動く解析処理（st.* は一切使わない）。
 
+    creds/file_id が渡された場合は、まずドライブから省メモリで録画をダウンロードする。
     画面を閉じてもこのスレッドは走り続け、完了したら履歴レコードを更新する。
     """
+    own_tmp: str | None = None
     try:
+        if tmp_path is None:
+            # ドライブから大容量録画をチャンク保存（メモリに全部載せない）
+            fd, own_tmp = tempfile.mkstemp(suffix=suffix)
+            os.close(fd)
+            google_drive.download_to_path(creds, file_id, own_tmp)
+            tmp_path = own_tmp
         result = gemini_analyzer.analyze(
             tmp_path,
             storage.get_reference_talk(),
@@ -136,36 +150,44 @@ def _analyze_worker(
         storage.finish_evaluation(handle, user_email, result, label)
         # 商談から抽出した弊社ナレッジを蓄積（使うほど評価が弊社仕様に賢くなる）
         storage.append_knowledge(result.knowledge)
-    except Exception as exc:  # API エラー等。失敗として履歴に残す。
+    except Exception as exc:  # API/ダウンロードエラー等。失敗として履歴に残す。
         storage.fail_evaluation(handle, user_email, _friendly_gemini_error(exc), label)
     finally:
-        Path(tmp_path).unlink(missing_ok=True)
+        if tmp_path:
+            Path(tmp_path).unlink(missing_ok=True)
 
 
-def _run_analysis(video_bytes: bytes, suffix: str, user: dict, label: str) -> None:
-    """アップロード済みの動画を『背景で』解析し、結果は履歴に出す。
-
-    アップロードさえ完了していれば、この後アプリを閉じても解析はサーバー側で続く。
-    """
-    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
-        tmp.write(video_bytes)
-        tmp_path = tmp.name
-
+def _start_job(user: dict, label: str, **worker_kwargs) -> None:
+    """背景ジョブを開始し、利用者に『閉じてOK』を伝える共通処理。"""
     job_id = time.strftime("%Y%m%d_%H%M%S") + "_" + uuid.uuid4().hex[:6]
     handle = storage.start_evaluation(user["email"], job_id, label)
-
     thread = threading.Thread(
         target=_analyze_worker,
-        args=(handle, tmp_path, user["email"], label),
+        kwargs=dict(handle=handle, user_email=user["email"], label=label, **worker_kwargs),
         daemon=True,
     )
     thread.start()
-
     st.success(
         "✅ 評価を開始しました。解析はサーバーの裏で進みます。"
         "**この画面を閉じても大丈夫**です。"
     )
-    st.info("結果は「🕘 評価履歴」タブに表示されます（完了まで数十秒〜数分）。")
+    st.info("結果は「🕘 評価履歴」タブに表示されます（長尺の録画は数分〜十数分かかります）。")
+
+
+def _run_analysis(video_bytes: bytes, suffix: str, user: dict, label: str) -> None:
+    """PC アップロード済みの動画を一時保存し、背景ジョブとして解析する。"""
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+        tmp.write(video_bytes)
+        tmp_path = tmp.name
+    _start_job(user, label, tmp_path=tmp_path)
+
+
+def _start_drive_job(creds, file_id: str, user: dict, label: str) -> None:
+    """ドライブの録画を『ダウンロードから解析まで』丸ごと背景で実行する。
+
+    ボタンを押した後は、ダウンロード中でも画面を閉じてOK（サーバー側で続行）。
+    """
+    _start_job(user, label, creds=creds, file_id=file_id, suffix=".mp4")
 
 
 def render_evaluate_tab(user: dict) -> None:
@@ -223,9 +245,7 @@ def _render_member_drive_picker(user: dict) -> None:
     labels = {f["id"]: f"{f['name']}　[{f.get('createdTime', '')[:10]}]" for f in files}
     file_id = st.selectbox("動画を選択", options=list(labels), format_func=lambda i: labels[i])
     if st.button("AI で評価する"):
-        with st.spinner("ドライブから動画を取得中…"):
-            video_bytes = google_drive.download_file(creds, file_id)
-        _run_analysis(video_bytes, ".mp4", user, f"{member}｜{labels[file_id]}")
+        _start_drive_job(creds, file_id, user, f"{member}｜{labels[file_id]}")
 
 
 def _render_drive_picker(creds, user: dict) -> None:
@@ -257,9 +277,7 @@ def _render_drive_picker(creds, user: dict) -> None:
         "動画を選択", options=list(labels), format_func=lambda i: labels[i]
     )
     if st.button("AI で評価する"):
-        with st.spinner("ドライブから動画を取得中…"):
-            video_bytes = google_drive.download_file(creds, file_id)
-        _run_analysis(video_bytes, ".mp4", user, labels[file_id])
+        _start_drive_job(creds, file_id, user, labels[file_id])
 
 
 def _register_reference_from_video(data: bytes, suffix: str, name: str) -> None:

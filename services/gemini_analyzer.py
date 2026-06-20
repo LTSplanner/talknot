@@ -53,9 +53,21 @@ def analyze(
     uploaded = _wait_until_active(client, uploaded)
 
     prompt = prompts.build_evaluation_prompt(reference_talk, knowledge_base)
+
+    mime = getattr(uploaded, "mime_type", "") or ""
+    if mime.startswith("video/"):
+        # 動画はフレームを間引いて（低fps）トークンを抑える。身振り手振りは残しつつ
+        # 2〜3時間でも文脈上限に収まりやすくする。
+        media_part = types.Part(
+            file_data=types.FileData(file_uri=uploaded.uri, mime_type=mime),
+            video_metadata=types.VideoMetadata(fps=settings.GEMINI_VIDEO_FPS),
+        )
+    else:
+        media_part = uploaded  # 音声などはそのまま
+
     response = client.models.generate_content(
         model=settings.GEMINI_MODEL,
-        contents=[uploaded, prompt],
+        contents=[media_part, prompt],
         config=types.GenerateContentConfig(
             response_mime_type="application/json",
             # 動画は声・間が読めれば十分。映像解像度を下げてトークン消費を大幅削減し、

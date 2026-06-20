@@ -103,6 +103,9 @@ SHEETS_SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 # 動画・音声解析に対応したモデル。.env で差し替え可能。
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+# 動画のフレーム抽出レート（fps）。低くするほどトークン消費が減り、長尺（2〜3時間）でも
+# 文脈上限に収まりやすくなる。身振り手振りは 0.5fps 程度で十分読み取れる。
+GEMINI_VIDEO_FPS = float(os.getenv("GEMINI_VIDEO_FPS", "0.5"))
 
 
 def is_admin(email: str | None) -> bool:
