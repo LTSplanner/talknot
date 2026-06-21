@@ -20,6 +20,10 @@ from core.models import EvaluationResult, KnowledgeItem
 _KNOWLEDGE_NAME = "knowledge.json"
 # 知識項目の上限。超えたら古いものから間引き、毎回の評価コストと容量を一定に保つ。
 _KNOWLEDGE_MAX_ITEMS = 150
+# 社内ナレッジ資料（商品・料金・サービス・FAQ の整備済みテキスト）の保存名と、
+# 評価プロンプトへ載せる文字数上限（トークン暴発防止）。
+_KNOWLEDGE_DOC_NAME = "knowledge_doc.txt"
+_KNOWLEDGE_DOC_BUDGET = 60000
 
 
 # --------------------------------------------------------------------------- #
@@ -279,24 +283,94 @@ def get_knowledge_items() -> list[dict]:
     return _load_knowledge()
 
 
+# --- 社内ナレッジ資料（商品・料金・サービス・FAQ の整備済みテキスト）------------- #
+def _load_knowledge_doc() -> str:
+    if _use_sheets():
+        from services import sheets_knowledge
+
+        try:
+            return sheets_knowledge.load_doc()
+        except Exception:
+            return ""
+    if _use_gcs():
+        blob = _bucket().blob(_gcs_path(_KNOWLEDGE_DOC_NAME))
+        if not blob.exists():
+            return ""
+        try:
+            return blob.download_as_text()
+        except OSError:
+            return ""
+    path = settings.DATA_DIR / _KNOWLEDGE_DOC_NAME
+    if not path.exists():
+        return ""
+    try:
+        return path.read_text(encoding="utf-8")
+    except OSError:
+        return ""
+
+
+def set_knowledge_doc(text: str) -> None:
+    """社内ナレッジ資料テキストを丸ごと保存する（既存資料を置き換える）。"""
+    text = (text or "").strip()
+    if _use_sheets():
+        from services import sheets_knowledge
+
+        sheets_knowledge.save_doc(text)
+        return
+    if _use_gcs():
+        _bucket().blob(_gcs_path(_KNOWLEDGE_DOC_NAME)).upload_from_string(
+            text, content_type="text/plain; charset=utf-8"
+        )
+        return
+    settings.DATA_DIR.mkdir(parents=True, exist_ok=True)
+    (settings.DATA_DIR / _KNOWLEDGE_DOC_NAME).write_text(text, encoding="utf-8")
+
+
+def get_knowledge_doc() -> str:
+    """保存済みの社内ナレッジ資料テキストを返す（無ければ空文字）。"""
+    return _load_knowledge_doc()
+
+
+def clear_knowledge_doc() -> None:
+    """社内ナレッジ資料を消す（管理者操作）。"""
+    set_knowledge_doc("")
+
+
 def get_knowledge_base() -> str | None:
-    """評価プロンプトへ渡す『弊社ナレッジ』テキストを返す（無ければ None）。"""
+    """評価プロンプトへ渡す『弊社ナレッジ』テキストを返す（無ければ None）。
+
+    ① 整備済みの社内資料（商品・料金・サービス・FAQ）＋② 商談から抽出した知識
+    の2部構成。①は文字数上限で切り詰めてトークン暴発を防ぐ。
+    """
+    sections: list[str] = []
+
+    doc = _load_knowledge_doc().strip()
+    if doc:
+        sections.append(
+            "【社内ナレッジ資料（商品・料金・サービス・FAQ）】\n"
+            + doc[:_KNOWLEDGE_DOC_BUDGET]
+        )
+
     items = _load_knowledge()
-    if not items:
+    if items:
+        lines: list[str] = []
+        for cat in ("product", "rule", "technique"):
+            group = [i["point"] for i in items if i.get("category") == cat]
+            if not group:
+                continue
+            lines.append(f"【{_CATEGORY_LABELS[cat]}】")
+            lines.extend(f"- {p}" for p in group)
+        # カテゴリ未分類のものも拾う
+        other = [i["point"] for i in items if i.get("category") not in _CATEGORY_LABELS]
+        if other:
+            lines.append("【その他】")
+            lines.extend(f"- {p}" for p in other)
+        if lines:
+            sections.append("\n".join(lines))
+
+    if not sections:
         return None
-    lines = []
-    for cat in ("product", "rule", "technique"):
-        group = [i["point"] for i in items if i.get("category") == cat]
-        if not group:
-            continue
-        lines.append(f"【{_CATEGORY_LABELS[cat]}】")
-        lines.extend(f"- {p}" for p in group)
-    # カテゴリ未分類のものも拾う
-    other = [i["point"] for i in items if i.get("category") not in _CATEGORY_LABELS]
-    if other:
-        lines.append("【その他】")
-        lines.extend(f"- {p}" for p in other)
-    return "\n".join(lines)
+    return "\n\n".join(sections)
 
 
 def clear_knowledge() -> None:

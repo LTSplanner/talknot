@@ -203,6 +203,48 @@ def save_reference(items: list[dict]) -> None:
     ).execute()
 
 
+# --------------------------------------------------------------------------- #
+# 社内ナレッジ資料（商品・料金・サービス・FAQ などの整備済みテキスト）
+# 1セル5万文字の上限があるため、複数行に分割して保存し、読み出し時に結合する。
+# --------------------------------------------------------------------------- #
+_DOC_TAB = "KnowledgeDoc"
+_DOC_CHUNK = 45000
+
+
+def load_doc() -> str:
+    """KnowledgeDoc タブの分割セルを結合して資料テキストを返す。"""
+    svc = _service()
+    try:
+        resp = (
+            svc.spreadsheets()
+            .values()
+            .get(spreadsheetId=_cfg("KNOWLEDGE_SHEET_ID"), range=f"{_DOC_TAB}!A2:A")
+            .execute()
+        )
+    except Exception:
+        return ""
+    return "".join((r[0] if r else "") for r in resp.get("values", []))
+
+
+def save_doc(text: str) -> None:
+    """資料テキストを KnowledgeDoc タブへ分割保存する（タブが無ければ作る）。"""
+    svc = _service()
+    _ensure_tab(svc, _DOC_TAB)
+    sid = _cfg("KNOWLEDGE_SHEET_ID")
+    svc.spreadsheets().values().clear(
+        spreadsheetId=sid, range=f"{_DOC_TAB}!A:A"
+    ).execute()
+    text = text or ""
+    chunks = [text[i : i + _DOC_CHUNK] for i in range(0, len(text), _DOC_CHUNK)] or [""]
+    values = [["doc"]] + [[c] for c in chunks]
+    svc.spreadsheets().values().update(
+        spreadsheetId=sid,
+        range=f"{_DOC_TAB}!A1",
+        valueInputOption="RAW",
+        body={"values": values},
+    ).execute()
+
+
 def load() -> list[dict]:
     """シート全体を読み、知識項目の dict リストを返す。"""
     svc = _service()

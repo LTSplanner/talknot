@@ -102,6 +102,33 @@ def test_knowledge_clear(tmp_storage):
     assert storage.get_knowledge_items() == []
 
 
+def test_knowledge_doc_set_get_clear(tmp_storage):
+    assert storage.get_knowledge_doc() == ""
+    storage.set_knowledge_doc("  料金は実見積ベースで案内する  ")
+    assert storage.get_knowledge_doc() == "料金は実見積ベースで案内する"
+    storage.clear_knowledge_doc()
+    assert storage.get_knowledge_doc() == ""
+
+
+def test_knowledge_base_combines_doc_and_items(tmp_storage):
+    # 資料だけでも knowledge_base に載る
+    storage.set_knowledge_doc("FAQ: 保証は10年です")
+    base = storage.get_knowledge_base()
+    assert "社内ナレッジ資料" in base and "保証は10年" in base
+    # 抽出知識と併存する
+    storage.append_knowledge([KnowledgeItem("product", "ZEH仕様は補助金対象")])
+    base = storage.get_knowledge_base()
+    assert "保証は10年" in base and "ZEH仕様" in base
+
+
+def test_knowledge_base_doc_is_budget_capped(tmp_storage, monkeypatch):
+    monkeypatch.setattr(storage, "_KNOWLEDGE_DOC_BUDGET", 50)
+    storage.set_knowledge_doc("あ" * 500)
+    base = storage.get_knowledge_base()
+    # 見出し分を除いた資料本文が上限で切り詰められている
+    assert base.count("あ") == 50
+
+
 def test_background_job_lifecycle_done(tmp_storage):
     storage.start_evaluation("taro@x.com", "20260620_1_abc", "商談A")
     recs = storage.list_evaluations("taro@x.com")

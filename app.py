@@ -515,11 +515,12 @@ _CATEGORY_LABELS = {
 
 
 def render_knowledge_tab(user: dict) -> None:
-    st.markdown("##### 弊社ナレッジ（AIが商談から学んだ社内知識）")
+    st.markdown("##### 弊社ナレッジ（AIが前提にする社内知識）")
     st.write(
-        "商談を評価するたびに、AI が『商品知識・社内ルール・トーク技術』を抽出して"
-        "ここに蓄積します。次回からの評価はこの知識を前提に、弊社仕様で行われます。"
-        "（個人情報は含めません）"
+        "AI は2種類の社内知識を前提に評価します："
+        "**① 整備済みの社内資料**（商品・料金・サービス・FAQ）と、"
+        "**② 商談から自動で学んだ知識**（商品知識・社内ルール・トーク技術）。"
+        "これにより評価が弊社仕様になります。（個人情報は含めません）"
     )
     from services import sheets_knowledge
     if sheets_knowledge.configured():
@@ -527,26 +528,83 @@ def render_knowledge_tab(user: dict) -> None:
     else:
         st.caption("⚠️ 現在はアプリ内に一時保存です（再起動で消える可能性）。共有ドライブ保存は docs/SETUP_KNOWLEDGE_SHEET.md を設定すると有効になります。")
 
+    # ① 整備済みの社内ナレッジ資料（商品・料金・サービス・FAQ）
+    doc = storage.get_knowledge_doc()
+    st.divider()
+    st.markdown("**📚 社内ナレッジ資料（商品・料金・サービス・FAQ）**")
+    if doc:
+        st.caption(f"取り込み済み：約 {len(doc):,} 文字。毎回の評価で AI がこの資料を前提に判定します。")
+        with st.expander("資料の中身を確認する"):
+            st.text(doc[:4000] + ("\n…（以下省略）" if len(doc) > 4000 else ""))
+    else:
+        st.caption("まだ取り込まれていません。下のボタンでドライブの資料フォルダから取り込めます（管理者）。")
+
+    if settings.is_admin(user.get("email")):
+        _render_knowledge_doc_admin(user, has_doc=bool(doc))
+
+    st.divider()
+    # ② 商談から AI が自動抽出して蓄積する知識
+    st.markdown("**🧠 商談から学んだ知識（自動蓄積）**")
     items = storage.get_knowledge_items()
     if not items:
         st.caption("まだ蓄積された知識はありません。商談を評価すると貯まっていきます。")
-        return
+    else:
+        st.caption(f"蓄積件数：{len(items)} 件")
+        for cat, label in _CATEGORY_LABELS.items():
+            group = [i["point"] for i in items if i.get("category") == cat]
+            if not group:
+                continue
+            st.markdown(f"**{label}**（{len(group)}件）")
+            for p in group:
+                st.markdown(f"- {p}")
+        if settings.is_admin(user.get("email")):
+            if st.button("🗑️ 蓄積した知識をすべて消去", key="clear_knowledge"):
+                storage.clear_knowledge()
+                st.success("弊社ナレッジを消去しました。")
+                st.rerun()
 
-    st.caption(f"蓄積件数：{len(items)} 件")
-    for cat, label in _CATEGORY_LABELS.items():
-        group = [i["point"] for i in items if i.get("category") == cat]
-        if not group:
-            continue
-        st.markdown(f"**{label}**（{len(group)}件）")
-        for p in group:
-            st.markdown(f"- {p}")
 
-    if settings.is_admin(user.get("email")):
-        st.divider()
-        if st.button("🗑️ 蓄積した知識をすべて消去", key="clear_knowledge"):
-            storage.clear_knowledge()
-            st.success("弊社ナレッジを消去しました。")
-            st.rerun()
+def _render_knowledge_doc_admin(user: dict, has_doc: bool) -> None:
+    """管理者向け：ドライブの資料フォルダから社内ナレッジ資料を取り込む／消去する。"""
+    from services import google_drive
+
+    with st.expander("📁 資料フォルダから取り込み・更新（管理者）"):
+        st.caption(
+            "社内の質疑応答AI用に整備した資料フォルダから、商品・料金・サービス・FAQ を取り込みます。"
+            "巨大な統合シート・生CSV・メール書庫は自動で除外します。"
+        )
+        folder_id = st.text_input(
+            "資料フォルダ ID", value=settings.KNOWLEDGE_FOLDER_ID, key="kdoc_folder"
+        )
+        col_a, col_b = st.columns(2)
+        with col_a:
+            if st.button("📥 取り込む / 更新する", key="kdoc_import", use_container_width=True):
+                creds = session.get_credentials()
+                if not creds:
+                    st.error("ドライブ連携の認証が必要です。一度ログインし直してください。")
+                else:
+                    with st.spinner("資料を読み込んでいます…"):
+                        try:
+                            svc = google_drive._service(creds)
+                            text, included, skipped = google_drive.export_knowledge_folder(
+                                svc, folder_id.strip()
+                            )
+                            if not text:
+                                st.warning("取り込める資料が見つかりませんでした（フォルダの共有設定をご確認ください）。")
+                            else:
+                                storage.set_knowledge_doc(text)
+                                st.success(
+                                    f"取り込み完了：{len(included)} 件・約 {len(text):,} 文字を保存しました。"
+                                )
+                                st.caption("取り込んだ資料：" + " / ".join(included))
+                                st.rerun()
+                        except Exception as exc:  # noqa: BLE001
+                            st.error(f"取り込みに失敗しました：{exc}")
+        with col_b:
+            if has_doc and st.button("🗑️ 社内資料を消去", key="kdoc_clear", use_container_width=True):
+                storage.clear_knowledge_doc()
+                st.success("社内ナレッジ資料を消去しました。")
+                st.rerun()
 
 
 def render_app(user: dict) -> None:

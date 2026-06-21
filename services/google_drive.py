@@ -79,6 +79,61 @@ def list_meet_recordings(credentials: Credentials, folder_name: str = "Meet") ->
     return list_videos(credentials)
 
 
+# 整備済みナレッジ資料として取り込む対象の判定。
+# Google ドキュメントは常に対象。スプレッドシートは「小さいもの」だけ対象にし、
+# 巨大な FAQ 統合シート・生 CSV・メール書庫サブフォルダは取り込まない。
+_DOC_MIME = "application/vnd.google-apps.document"
+_SHEET_MIME = "application/vnd.google-apps.spreadsheet"
+_SHEET_TEXT_LIMIT = 50000
+
+
+def _export_text(service, file_id: str, mime: str) -> str:
+    data = service.files().export(fileId=file_id, mimeType=mime).execute()
+    return data.decode("utf-8", "ignore") if isinstance(data, (bytes, bytearray)) else str(data)
+
+
+def export_knowledge_folder(service, folder_id: str) -> tuple[str, list[str], list[str]]:
+    """フォルダ直下の整備済み資料（Docs＋小さい Sheets）をテキスト化して結合する。
+
+    再帰しない（メール書庫サブフォルダを巻き込まないため）。
+    戻り値: (結合テキスト, 取り込んだ名前リスト, 除外した名前リスト)
+    """
+    resp = (
+        service.files()
+        .list(
+            q=f"'{folder_id}' in parents and trashed = false",
+            fields="files(id, name, mimeType)",
+            supportsAllDrives=True,
+            includeItemsFromAllDrives=True,
+            pageSize=500,
+        )
+        .execute()
+    )
+    files = sorted(resp.get("files", []), key=lambda f: f.get("name", ""))
+    parts: list[str] = []
+    included: list[str] = []
+    skipped: list[str] = []
+    for f in files:
+        name, mime = f.get("name", ""), f.get("mimeType", "")
+        if mime == _DOC_MIME:
+            txt = _export_text(service, f["id"], "text/plain")
+        elif mime == _SHEET_MIME:
+            txt = _export_text(service, f["id"], "text/csv")
+            if len(txt) > _SHEET_TEXT_LIMIT:
+                skipped.append(f"{name}（大きすぎるため除外 {len(txt)}字）")
+                continue
+        else:
+            skipped.append(f"{name}（対象外）")
+            continue
+        txt = (txt or "").strip()
+        if not txt:
+            skipped.append(f"{name}（空）")
+            continue
+        parts.append(f"# {name}\n{txt}")
+        included.append(name)
+    return "\n\n".join(parts), included, skipped
+
+
 def download_file(credentials: Credentials, file_id: str) -> bytes:
     """指定 file_id の動画をメモリ上に取得して bytes で返す（小さいファイル向け）。"""
     service = _service(credentials)

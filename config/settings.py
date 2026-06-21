@@ -97,6 +97,11 @@ KNOWLEDGE_SHEET_ID = os.getenv("KNOWLEDGE_SHEET_ID", "")
 KNOWLEDGE_SA_JSON = os.getenv("KNOWLEDGE_SA_JSON", "")
 KNOWLEDGE_SA_FILE = os.getenv("KNOWLEDGE_SA_FILE", "")
 KNOWLEDGE_SHEET_TAB = os.getenv("KNOWLEDGE_SHEET_TAB", "Knowledge")
+# 整備済みナレッジ資料（商品・料金・サービス・FAQ）が入った Drive フォルダ。
+# 管理者がここから「社内ナレッジ資料」を取り込み・更新できる。
+KNOWLEDGE_FOLDER_ID = os.getenv(
+    "KNOWLEDGE_FOLDER_ID", "15Q4Ei08Xubfib_0T2HcwYpdk93BDudl8"
+)
 SHEETS_SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 # 評価履歴の永続化先シート。未設定なら KNOWLEDGE_SHEET_ID と同じシート（Evaluations タブ）。
 # 将来「評価専用の別シート」に分けたくなったら、ここに別シートIDを設定するだけ。
