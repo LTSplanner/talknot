@@ -30,12 +30,20 @@ def _fernet():
     return Fernet(_key())
 
 
-@st.cache_resource
 def _cookie_manager():
-    """Cookie マネージャは1インスタンスだけ生成して使い回す。"""
-    import extra_streamlit_components as stx
+    """Cookie マネージャは1インスタンスだけ生成して使い回す。
 
-    return stx.CookieManager(key="tk_cookie_mgr")
+    CookieManager は内部でウィジェット（カスタムコンポーネント）を生成するため、
+    @st.cache_resource で包むと『キャッシュ関数内でウィジェット』警告が出る。
+    そのため session_state に1つだけ保持する（通常フローで生成・使い回し）。
+    """
+    mgr = st.session_state.get("_tk_cookie_mgr")
+    if mgr is None:
+        import extra_streamlit_components as stx
+
+        mgr = stx.CookieManager(key="tk_cookie_mgr")
+        st.session_state["_tk_cookie_mgr"] = mgr
+    return mgr
 
 
 def available() -> bool:
