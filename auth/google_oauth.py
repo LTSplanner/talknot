@@ -82,16 +82,21 @@ def handle_callback() -> dict | None:
     flow = _build_flow(state=st.session_state.get("oauth_state"))
     try:
         flow.fetch_token(code=code)
+        creds = flow.credentials
+        # IDトークン検証もここに含める。stateずれ・トークン失効・時刻ずれなどで
+        # 例外が出てもアプリを落とさず、再ログインに倒す（clock_skew で軽微な時刻差を許容）。
+        info = id_token.verify_oauth2_token(
+            creds.id_token,
+            google_requests.Request(),
+            settings.GOOGLE_CLIENT_ID,
+            clock_skew_in_seconds=10,
+        )
     except Exception:
-        # 使用済み/失効した認可コードの再交換（リロードや二重実行）。
-        # 既に未ログインなのでコードを捨てて、再ログインを促す。
+        # 使用済み/失効した認可コードの再交換（リロード・二重実行・再起動でstate消失）。
+        # コードを捨てて再ログインを促す（アプリは絶対に落とさない）。
         st.query_params.clear()
         return None
-    creds = flow.credentials
 
-    info = id_token.verify_oauth2_token(
-        creds.id_token, google_requests.Request(), settings.GOOGLE_CLIENT_ID
-    )
     email = info.get("email", "")
     if not info.get("email_verified") or not settings.is_allowed_domain(email):
         st.query_params.clear()

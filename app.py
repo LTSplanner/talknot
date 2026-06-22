@@ -74,6 +74,15 @@ def resolve_user() -> dict | None:
                 f"`{e.email}` は許可されていないドメインです。"
                 f"（許可: {', '.join(settings.ALLOWED_DOMAINS)}）"
             )
+        except Exception:
+            # OAuth周りの想定外エラーでもアプリは落とさず、ログインし直しに倒す。
+            st.session_state["login_error"] = (
+                "ログイン処理でエラーが発生しました。お手数ですが、もう一度ログインしてください。"
+            )
+            try:
+                st.query_params.clear()
+            except Exception:
+                pass
     return None
 
 
