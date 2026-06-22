@@ -7,7 +7,3 @@ font = "sans serif"
 
 [server]
 maxUploadSize = 2048
-
-[client]
-# エラー時に画面へ詳細（トレースバック）を表示する。原因特定のため一時的に有効化。
-showErrorDetails = true
