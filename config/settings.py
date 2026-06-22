@@ -37,6 +37,18 @@ ALLOWED_DOMAINS = _csv_env("ALLOWED_DOMAINS", "yourcompany.com")
 # 模範トーク登録などの管理者操作を許可するメール。
 ADMIN_EMAILS = _csv_env("ADMIN_EMAILS")
 
+# --- 同時実行の制御（無料枠のメモリ保護）---
+# 同時に走らせる動画解析の最大数。無料枠（RAM 約1GB）では 1 が安全。
+# 余裕のあるホストに移したら増やせる（環境変数 MAX_CONCURRENT_ANALYSES）。
+def _int_env(key: str, default: int) -> int:
+    try:
+        return max(1, int(os.getenv(key, str(default))))
+    except (TypeError, ValueError):
+        return default
+
+
+MAX_CONCURRENT_ANALYSES = _int_env("MAX_CONCURRENT_ANALYSES", 1)
+
 # --- Google OAuth / Drive ---
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
 GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "")

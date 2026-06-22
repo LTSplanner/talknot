@@ -10,7 +10,9 @@ GOOGLE_CLIENT_ID/SECRET が設定されていれば本物の Google 認証を、
 """
 from __future__ import annotations
 
+import gc
 import os
+import shutil
 import tempfile
 import threading
 import time
@@ -133,6 +135,11 @@ def _friendly_gemini_error(exc: Exception) -> str:
     return f"AI 解析でエラーが発生しました：{msg}"
 
 
+# 同時に走る重い解析の数を制限する。無料枠（RAM 約1GB）で複数人が同時に解析しても
+# メモリが急騰してコンテナが落ちないよう、超過分は自動的に順番待ち（キュー）になる。
+_ANALYSIS_SLOTS = threading.BoundedSemaphore(settings.MAX_CONCURRENT_ANALYSES)
+
+
 def _analyze_worker(
     job_id: str,
     user_email: str,
@@ -146,18 +153,21 @@ def _analyze_worker(
 
     creds/file_id が渡された場合は、まずドライブから省メモリで録画をダウンロードする。
     画面を閉じてもこのスレッドは走り続け、完了したら履歴レコードを更新する。
+    同時実行はセマフォで制限し、混雑時は順番待ちにしてメモリ超過の鯖落ちを防ぐ。
     """
     try:
-        if tmp_path is None:
-            # ドライブから大容量録画をチャンク保存（メモリに全部載せない）
-            fd, tmp_path = tempfile.mkstemp(suffix=suffix)
-            os.close(fd)
-            google_drive.download_to_path(creds, file_id, tmp_path)
-        result = gemini_analyzer.analyze(
-            tmp_path,
-            storage.get_reference_talk(),
-            storage.get_knowledge_base(),
-        )
+        # 重い処理（ダウンロード＋解析）だけを同時実行数の枠内で行う。
+        with _ANALYSIS_SLOTS:
+            if tmp_path is None:
+                # ドライブから大容量録画をチャンク保存（メモリに全部載せない）
+                fd, tmp_path = tempfile.mkstemp(suffix=suffix)
+                os.close(fd)
+                google_drive.download_to_path(creds, file_id, tmp_path)
+            result = gemini_analyzer.analyze(
+                tmp_path,
+                storage.get_reference_talk(),
+                storage.get_knowledge_base(),
+            )
         storage.finish_evaluation(user_email, job_id, result, label)
         # 商談から抽出した弊社ナレッジを蓄積（使うほど評価が弊社仕様に賢くなる）
         storage.append_knowledge(result.knowledge)
@@ -166,6 +176,7 @@ def _analyze_worker(
     finally:
         if tmp_path:
             Path(tmp_path).unlink(missing_ok=True)
+        gc.collect()  # 大きなバッファを早めに解放してメモリを戻す
 
 
 def _start_job(user: dict, label: str, **worker_kwargs) -> None:
@@ -182,13 +193,21 @@ def _start_job(user: dict, label: str, **worker_kwargs) -> None:
         "✅ 評価を開始しました。解析はサーバーの裏で進みます。"
         "**この画面を閉じても大丈夫**です。"
     )
-    st.info("結果は「🕘 評価履歴」タブに表示されます（長尺の録画は数分〜十数分かかります）。")
+    st.info(
+        "結果は「🕘 評価履歴」タブに表示されます（長尺の録画は数分〜十数分かかります）。"
+        "混雑時は順番待ちになることがあります。"
+    )
 
 
-def _run_analysis(video_bytes: bytes, suffix: str, user: dict, label: str) -> None:
-    """PC アップロード済みの動画を一時保存し、背景ジョブとして解析する。"""
+def _run_analysis(uploaded, suffix: str, user: dict, label: str) -> None:
+    """PC アップロード済みの動画を一時保存し、背景ジョブとして解析する。
+
+    `uploaded.getvalue()`（全体をもう一度メモリにコピー）を避け、ディスクへ
+    チャンクで書き出してピークメモリを抑える。
+    """
     with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
-        tmp.write(video_bytes)
+        uploaded.seek(0)
+        shutil.copyfileobj(uploaded, tmp, length=8 * 1024 * 1024)
         tmp_path = tmp.name
     _start_job(user, label, tmp_path=tmp_path)
 
@@ -220,7 +239,7 @@ def render_evaluate_tab(user: dict) -> None:
         )
         if uploaded and st.button("AI で評価する"):
             suffix = Path(uploaded.name).suffix or ".mp4"
-            _run_analysis(uploaded.getvalue(), suffix, user, uploaded.name)
+            _run_analysis(uploaded, suffix, user, uploaded.name)
     elif source.startswith("メンバー"):
         _render_member_drive_picker(user)
     else:
