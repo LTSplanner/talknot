@@ -134,19 +134,16 @@ def main() -> None:
         print(f"  {n:4d}  {c}")
     print(f"FAQブロック文字数: {len(faq_block)}")
 
-    # 既存ドキュメント（整備版5資料）に追記。既存FAQブロックがあれば置き換える。
-    current = storage.get_knowledge_doc()
-    base = current.split("\n" + MARKER)[0].split(MARKER)[0].rstrip()
-    new_doc = base + "\n\n" + faq_block
-    print(f"合計ドキュメント文字数: {len(new_doc)}（整備版 {len(base)} ＋ FAQ {len(faq_block)}）")
+    print(f"FAQセクション文字数: {len(faq_block)}")
 
     if args.dry_run:
         print("--dry-run のため保存しません。\n--- FAQ先頭800字 ---")
         print(faq_block[:800])
         return
 
-    storage.set_knowledge_doc(new_doc)
-    where = "共有シートの KnowledgeDoc タブ" if storage._use_sheets() else "ローカル/GCS"
+    # FAQ は独立セクション（faq）として保存。整備版(base)・議事録(meetings)には干渉しない。
+    storage.set_knowledge_doc(faq_block, kind="faq")
+    where = "共有シートの KnowledgeFAQ タブ" if storage._use_sheets() else "ローカル/GCS"
     print(f"💾 保存しました → {where}")
 
 

@@ -211,14 +211,14 @@ _DOC_TAB = "KnowledgeDoc"
 _DOC_CHUNK = 45000
 
 
-def load_doc() -> str:
-    """KnowledgeDoc タブの分割セルを結合して資料テキストを返す。"""
+def load_doc(tab: str = _DOC_TAB) -> str:
+    """指定タブの分割セルを結合して資料テキストを返す。"""
     svc = _service()
     try:
         resp = (
             svc.spreadsheets()
             .values()
-            .get(spreadsheetId=_cfg("KNOWLEDGE_SHEET_ID"), range=f"{_DOC_TAB}!A2:A")
+            .get(spreadsheetId=_cfg("KNOWLEDGE_SHEET_ID"), range=f"{tab}!A2:A")
             .execute()
         )
     except Exception:
@@ -226,22 +226,73 @@ def load_doc() -> str:
     return "".join((r[0] if r else "") for r in resp.get("values", []))
 
 
-def save_doc(text: str) -> None:
-    """資料テキストを KnowledgeDoc タブへ分割保存する（タブが無ければ作る）。"""
+def save_doc(text: str, tab: str = _DOC_TAB) -> None:
+    """資料テキストを指定タブへ分割保存する（タブが無ければ作る）。"""
     svc = _service()
-    _ensure_tab(svc, _DOC_TAB)
+    _ensure_tab(svc, tab)
     sid = _cfg("KNOWLEDGE_SHEET_ID")
     svc.spreadsheets().values().clear(
-        spreadsheetId=sid, range=f"{_DOC_TAB}!A:A"
+        spreadsheetId=sid, range=f"{tab}!A:A"
     ).execute()
     text = text or ""
     chunks = [text[i : i + _DOC_CHUNK] for i in range(0, len(text), _DOC_CHUNK)] or [""]
     values = [["doc"]] + [[c] for c in chunks]
     svc.spreadsheets().values().update(
         spreadsheetId=sid,
-        range=f"{_DOC_TAB}!A1",
+        range=f"{tab}!A1",
         valueInputOption="RAW",
         body={"values": values},
+    ).execute()
+
+
+# --------------------------------------------------------------------------- #
+# 商談議事録から抽出した実践知（増分処理の生データ＆処理済み管理）
+# 列: doc_id, category, insight, importance, added_at
+# --------------------------------------------------------------------------- #
+_MEET_TAB = "MeetingInsights"
+_MEET_HEADER = ["doc_id", "category", "insight", "importance", "added_at"]
+
+
+def load_meeting_insights() -> list[dict]:
+    svc = _service()
+    try:
+        resp = (
+            svc.spreadsheets()
+            .values()
+            .get(spreadsheetId=_cfg("KNOWLEDGE_SHEET_ID"), range=f"{_MEET_TAB}!A2:E")
+            .execute()
+        )
+    except Exception:
+        return []
+    out = []
+    for row in resp.get("values", []):
+        def c(i):
+            return (row[i] if len(row) > i else "").strip()
+
+        if not c(0):
+            continue
+        out.append({
+            "doc_id": c(0), "category": c(1), "insight": c(2),
+            "importance": c(3), "added_at": c(4),
+        })
+    return out
+
+
+def save_meeting_insights(items: list[dict]) -> None:
+    svc = _service()
+    _ensure_tab(svc, _MEET_TAB)
+    sid = _cfg("KNOWLEDGE_SHEET_ID")
+    svc.spreadsheets().values().clear(
+        spreadsheetId=sid, range=f"{_MEET_TAB}!A:E"
+    ).execute()
+    values = [_MEET_HEADER] + [
+        [it.get("doc_id", ""), it.get("category", ""), it.get("insight", ""),
+         str(it.get("importance", "")), it.get("added_at", "")]
+        for it in items
+    ]
+    svc.spreadsheets().values().update(
+        spreadsheetId=sid, range=f"{_MEET_TAB}!A1",
+        valueInputOption="RAW", body={"values": values},
     ).execute()
 
 

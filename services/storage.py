@@ -22,9 +22,33 @@ _KNOWLEDGE_NAME = "knowledge.json"
 _KNOWLEDGE_MAX_ITEMS = 150
 # 社内ナレッジ資料（商品・料金・サービス・FAQ の整備済みテキスト）の保存名と、
 # 評価プロンプトへ載せる文字数上限（トークン暴発防止）。
-_KNOWLEDGE_DOC_NAME = "knowledge_doc.txt"
-# 整備版資料(約3.9万字)＋FAQ抜粋(約4万字)を載せられるよう上限を確保。
-_KNOWLEDGE_DOC_BUDGET = 100000
+# 社内資料ドキュメントは3セクションを独立保存する（再取り込みが互いに干渉しない）。
+#   base     … 整備版資料（商品・料金・サービス）
+#   faq      … FAQ統合シート抜粋
+#   meetings … 商談議事録から抽出した実践知
+_DOC_KINDS = {
+    "base": ("knowledge_doc.txt", "KnowledgeDoc"),
+    "faq": ("knowledge_faq.txt", "KnowledgeFAQ"),
+    "meetings": ("knowledge_meetings.txt", "KnowledgeMeetings"),
+}
+_KNOWLEDGE_DOC_BUDGET = 60000   # base 上限
+_FAQ_DOC_BUDGET = 45000         # faq 上限
+_MEETINGS_DOC_BUDGET = 40000    # meetings 上限
+
+
+def _doc_budget(kind: str) -> int:
+    return {
+        "base": _KNOWLEDGE_DOC_BUDGET,
+        "faq": _FAQ_DOC_BUDGET,
+        "meetings": _MEETINGS_DOC_BUDGET,
+    }[kind]
+
+
+_DOC_HEADERS = {
+    "base": "【社内ナレッジ資料（商品・料金・サービス）】",
+    "faq": "",        # FAQブロックは自前の見出しを持つ
+    "meetings": "",   # 議事録ブロックも自前の見出しを持つ
+}
 
 
 # --------------------------------------------------------------------------- #
@@ -284,24 +308,25 @@ def get_knowledge_items() -> list[dict]:
     return _load_knowledge()
 
 
-# --- 社内ナレッジ資料（商品・料金・サービス・FAQ の整備済みテキスト）------------- #
-def _load_knowledge_doc() -> str:
+# --- 社内ナレッジ資料（base=整備版 / faq / meetings の3セクション）-------------- #
+def _load_knowledge_doc(kind: str = "base") -> str:
+    name, tab = _DOC_KINDS[kind]
     if _use_sheets():
         from services import sheets_knowledge
 
         try:
-            return sheets_knowledge.load_doc()
+            return sheets_knowledge.load_doc(tab)
         except Exception:
             return ""
     if _use_gcs():
-        blob = _bucket().blob(_gcs_path(_KNOWLEDGE_DOC_NAME))
+        blob = _bucket().blob(_gcs_path(name))
         if not blob.exists():
             return ""
         try:
             return blob.download_as_text()
         except OSError:
             return ""
-    path = settings.DATA_DIR / _KNOWLEDGE_DOC_NAME
+    path = settings.DATA_DIR / name
     if not path.exists():
         return ""
     try:
@@ -310,47 +335,184 @@ def _load_knowledge_doc() -> str:
         return ""
 
 
-def set_knowledge_doc(text: str) -> None:
-    """社内ナレッジ資料テキストを丸ごと保存する（既存資料を置き換える）。"""
+def set_knowledge_doc(text: str, kind: str = "base") -> None:
+    """社内ナレッジ資料テキストを丸ごと保存する（該当セクションを置き換える）。"""
     text = (text or "").strip()
+    name, tab = _DOC_KINDS[kind]
     if _use_sheets():
         from services import sheets_knowledge
 
-        sheets_knowledge.save_doc(text)
+        sheets_knowledge.save_doc(text, tab)
         return
     if _use_gcs():
-        _bucket().blob(_gcs_path(_KNOWLEDGE_DOC_NAME)).upload_from_string(
+        _bucket().blob(_gcs_path(name)).upload_from_string(
             text, content_type="text/plain; charset=utf-8"
         )
         return
     settings.DATA_DIR.mkdir(parents=True, exist_ok=True)
-    (settings.DATA_DIR / _KNOWLEDGE_DOC_NAME).write_text(text, encoding="utf-8")
+    (settings.DATA_DIR / name).write_text(text, encoding="utf-8")
 
 
-def get_knowledge_doc() -> str:
+def get_knowledge_doc(kind: str = "base") -> str:
     """保存済みの社内ナレッジ資料テキストを返す（無ければ空文字）。"""
-    return _load_knowledge_doc()
+    return _load_knowledge_doc(kind)
 
 
-def clear_knowledge_doc() -> None:
+def clear_knowledge_doc(kind: str = "base") -> None:
     """社内ナレッジ資料を消す（管理者操作）。"""
-    set_knowledge_doc("")
+    set_knowledge_doc("", kind)
+
+
+# --- 商談議事録から抽出した実践知（増分処理＋重要度順の蒸留）------------------- #
+_MEET_JSON_NAME = "meeting_insights.json"
+_MEET_MAX_DISTILL = 220  # meetings セクションに展開する最大件数
+
+_MEET_CAT_LABELS = {
+    "product": "商品知識",
+    "rule": "社内ルール・運用",
+    "technique": "トーク技術",
+    "customer": "お客様の不安・反応パターン",
+}
+
+
+def _load_meeting_insights() -> list[dict]:
+    if _use_sheets():
+        from services import sheets_knowledge
+
+        try:
+            return sheets_knowledge.load_meeting_insights()
+        except Exception:
+            return []
+    if _use_gcs():
+        blob = _bucket().blob(_gcs_path(_MEET_JSON_NAME))
+        if not blob.exists():
+            return []
+        try:
+            return json.loads(blob.download_as_text())
+        except (json.JSONDecodeError, OSError):
+            return []
+    path = settings.DATA_DIR / _MEET_JSON_NAME
+    if not path.exists():
+        return []
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return []
+
+
+def _save_meeting_insights(items: list[dict]) -> None:
+    if _use_sheets():
+        from services import sheets_knowledge
+
+        sheets_knowledge.save_meeting_insights(items)
+        return
+    payload = json.dumps(items, ensure_ascii=False, indent=2)
+    if _use_gcs():
+        _bucket().blob(_gcs_path(_MEET_JSON_NAME)).upload_from_string(
+            payload, content_type="application/json"
+        )
+        return
+    settings.DATA_DIR.mkdir(parents=True, exist_ok=True)
+    (settings.DATA_DIR / _MEET_JSON_NAME).write_text(payload, encoding="utf-8")
+
+
+def get_processed_meeting_ids() -> set:
+    """すでに抽出済みの議事録ファイルIDの集合（再処理スキップ用）。"""
+    return {it.get("doc_id", "") for it in _load_meeting_insights() if it.get("doc_id")}
+
+
+def count_meeting_insights() -> int:
+    return sum(1 for it in _load_meeting_insights() if (it.get("insight") or "").strip())
+
+
+def add_meeting_insights(doc_id: str, items: list[dict]) -> int:
+    """1つの議事録から抽出した知見を追記する（知見0件でも処理済みとして記録）。"""
+    existing = _load_meeting_insights()
+    now = time.strftime("%Y-%m-%d %H:%M:%S")
+    added = 0
+    for it in items:
+        insight = (it.get("insight") or "").strip()
+        if not insight:
+            continue
+        existing.append({
+            "doc_id": doc_id,
+            "category": (it.get("category") or "").strip(),
+            "insight": insight,
+            "importance": str(it.get("importance", "")),
+            "added_at": now,
+        })
+        added += 1
+    if added == 0:
+        # 知見ゼロでも処理済みマーカーを残す
+        existing.append({
+            "doc_id": doc_id, "category": "", "insight": "",
+            "importance": "", "added_at": now,
+        })
+    _save_meeting_insights(existing)
+    return added
+
+
+def distill_meeting_knowledge() -> int:
+    """蓄積した議事録の知見を重複統合・重要度順に圧縮して meetings セクションへ展開する。"""
+    raw = [it for it in _load_meeting_insights() if (it.get("insight") or "").strip()]
+    merged: dict = {}
+    for it in raw:
+        key = _norm(it["insight"])
+        try:
+            imp = int(float(it.get("importance") or 0))
+        except (TypeError, ValueError):
+            imp = 0
+        if key not in merged:
+            merged[key] = {
+                "category": it.get("category", ""),
+                "insight": it["insight"].strip(),
+                "importance": imp,
+                "freq": 1,
+            }
+        else:
+            m = merged[key]
+            m["importance"] = max(m["importance"], imp)
+            m["freq"] += 1
+    ranked = sorted(merged.values(), key=lambda x: (-x["importance"], -x["freq"]))
+
+    lines = ["===== 商談議事録から学んだ実践知（重要度順・個人情報は除外） ====="]
+    total = len(lines[0])
+    count = 0
+    for r in ranked:
+        if count >= _MEET_MAX_DISTILL:
+            break
+        label = _MEET_CAT_LABELS.get(r["category"], r["category"] or "その他")
+        line = f"[{label}] {r['insight']}"
+        if total + len(line) + 1 > _MEETINGS_DOC_BUDGET:
+            break
+        lines.append(line)
+        total += len(line) + 1
+        count += 1
+    set_knowledge_doc("\n".join(lines) if count else "", kind="meetings")
+    return count
+
+
+def clear_meeting_insights() -> None:
+    """議事録の知見・処理済み記録をすべて消す（管理者操作）。"""
+    _save_meeting_insights([])
+    set_knowledge_doc("", kind="meetings")
 
 
 def get_knowledge_base() -> str | None:
     """評価プロンプトへ渡す『弊社ナレッジ』テキストを返す（無ければ None）。
 
-    ① 整備済みの社内資料（商品・料金・サービス・FAQ）＋② 商談から抽出した知識
-    の2部構成。①は文字数上限で切り詰めてトークン暴発を防ぐ。
+    base（整備版資料）＋ faq（FAQ抜粋）＋ meetings（議事録の実践知）＋ 商談抽出知識。
+    各セクションは文字数上限で切り詰めてトークン暴発を防ぐ。
     """
     sections: list[str] = []
 
-    doc = _load_knowledge_doc().strip()
-    if doc:
-        sections.append(
-            "【社内ナレッジ資料（商品・料金・サービス・FAQ）】\n"
-            + doc[:_KNOWLEDGE_DOC_BUDGET]
-        )
+    for kind in ("base", "faq", "meetings"):
+        text = _load_knowledge_doc(kind).strip()
+        if not text:
+            continue
+        header = _DOC_HEADERS[kind]
+        body = text[: _doc_budget(kind)]
+        sections.append(f"{header}\n{body}" if header else body)
 
     items = _load_knowledge()
     if items:

@@ -114,6 +114,11 @@ KNOWLEDGE_SHEET_TAB = os.getenv("KNOWLEDGE_SHEET_TAB", "Knowledge")
 KNOWLEDGE_FOLDER_ID = os.getenv(
     "KNOWLEDGE_FOLDER_ID", "15Q4Ei08Xubfib_0T2HcwYpdk93BDudl8"
 )
+# 商談議事録フォルダ。新規議事録から実践ナレッジを増分抽出する対象。
+# クラウドのボタンで読むには、このフォルダを知識SAに「閲覧者」で共有しておく。
+MINUTES_FOLDER_ID = os.getenv("MINUTES_FOLDER_ID", "14yefycrO6ylPVT0LAqbh10HjrDV-9FDd")
+# 議事録抽出に使うモデル（無料枠の広いものを推奨）。
+MINUTES_EXTRACT_MODEL = os.getenv("MINUTES_EXTRACT_MODEL", "gemini-2.5-flash-lite")
 SHEETS_SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 # 評価履歴の永続化先シート。未設定なら KNOWLEDGE_SHEET_ID と同じシート（Evaluations タブ）。
 # 将来「評価専用の別シート」に分けたくなったら、ここに別シートIDを設定するだけ。

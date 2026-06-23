@@ -565,19 +565,29 @@ def render_knowledge_tab(user: dict) -> None:
     else:
         st.caption("⚠️ 現在はアプリ内に一時保存です（再起動で消える可能性）。共有ドライブ保存は docs/SETUP_KNOWLEDGE_SHEET.md を設定すると有効になります。")
 
-    # ① 整備済みの社内ナレッジ資料（商品・料金・サービス・FAQ）
-    doc = storage.get_knowledge_doc()
+    # ① 整備済みの社内ナレッジ資料（base=資料 / faq / meetings=議事録の実践知）
+    base = storage.get_knowledge_doc("base")
+    faq = storage.get_knowledge_doc("faq")
+    meet = storage.get_knowledge_doc("meetings")
     st.divider()
-    st.markdown("**📚 社内ナレッジ資料（商品・料金・サービス・FAQ）**")
-    if doc:
-        st.caption(f"取り込み済み：約 {len(doc):,} 文字。毎回の評価で AI がこの資料を前提に判定します。")
+    st.markdown("**📚 社内ナレッジ資料（商品・料金・サービス・FAQ・議事録）**")
+    if base or faq or meet:
+        st.caption(
+            f"取り込み済み：資料 約{len(base):,}字 ／ FAQ 約{len(faq):,}字 ／ "
+            f"議事録の実践知 約{len(meet):,}字。毎回の評価で AI がこれらを前提に判定します。"
+        )
         with st.expander("資料の中身を確認する"):
-            st.text(doc[:4000] + ("\n…（以下省略）" if len(doc) > 4000 else ""))
+            if base:
+                st.text(base[:2500] + ("\n…（以下省略）" if len(base) > 2500 else ""))
+            if meet:
+                st.markdown("**— 議事録から学んだ実践知（抜粋）—**")
+                st.text(meet[:2500] + ("\n…（以下省略）" if len(meet) > 2500 else ""))
     else:
         st.caption("まだ取り込まれていません。下のボタンでドライブの資料フォルダから取り込めます（管理者）。")
 
     if settings.is_admin(user.get("email")):
-        _render_knowledge_doc_admin(user, has_doc=bool(doc))
+        _render_knowledge_doc_admin(user, has_doc=bool(base))
+        _render_meeting_admin(user)
 
     st.divider()
     # ② 商談から AI が自動抽出して蓄積する知識
@@ -641,6 +651,66 @@ def _render_knowledge_doc_admin(user: dict, has_doc: bool) -> None:
             if has_doc and st.button("🗑️ 社内資料を消去", key="kdoc_clear", use_container_width=True):
                 storage.clear_knowledge_doc()
                 st.success("社内ナレッジ資料を消去しました。")
+                st.rerun()
+
+
+# 議事録取り込みジョブの状態（背景スレッドと共有。st.* は使わない）。
+_MEETING_JOB = {"running": False, "result": None}
+
+
+def _meeting_worker(limit: int) -> None:
+    from services import meeting_extractor
+
+    try:
+        _MEETING_JOB["result"] = meeting_extractor.run_extraction(limit=limit)
+    except Exception as exc:  # noqa: BLE001
+        _MEETING_JOB["result"] = {"error": str(exc)}
+    finally:
+        _MEETING_JOB["running"] = False
+
+
+def _render_meeting_admin(user: dict) -> None:
+    """管理者向け：商談議事録から実践ナレッジを増分取り込みする。"""
+    from services import meeting_extractor
+
+    with st.expander("📝 商談議事録から学習（増分取り込み・管理者）"):
+        st.caption(
+            "商談議事録フォルダから、新規分だけをAIで要約抽出してナレッジに追加します"
+            "（個人情報は除外）。無料枠を守るため1回 最大30件ずつ・順番に処理します。"
+        )
+        processed_docs = len(storage.get_processed_meeting_ids())
+        insights = storage.count_meeting_insights()
+        st.caption(f"処理済み議事録：{processed_docs} 件 ／ 抽出した実践知：{insights} 件")
+
+        if not meeting_extractor.configured():
+            st.warning(
+                "未設定です。議事録フォルダを知識SA（共有用アカウント）に「閲覧者」で共有し、"
+                "KNOWLEDGE_SA と GEMINI_API_KEY が設定されている必要があります。"
+            )
+            return
+
+        if _MEETING_JOB["running"]:
+            st.info("⏳ 取り込み中です（裏で処理）。1〜数分後にこのページを更新してください。")
+        else:
+            res = _MEETING_JOB.get("result")
+            if res:
+                if res.get("error"):
+                    st.error(f"取り込みエラー：{res['error'][:200]}")
+                else:
+                    msg = (f"取り込み完了：{res['processed']}件処理／新知見 {res['added']}件／"
+                           f"展開 {res['distilled']}件／残り 約{res['remaining']}件")
+                    if res.get("quota"):
+                        st.warning(msg + "\n\n⚠️ 無料枠の上限に達したため途中で止まりました。時間をおいて再度押すと続きから処理します。")
+                    else:
+                        st.success(msg)
+            if st.button("📝 新規議事録を取り込む（最大30件）", key="meet_import"):
+                _MEETING_JOB["running"] = True
+                _MEETING_JOB["result"] = None
+                threading.Thread(target=_meeting_worker, args=(30,), daemon=True).start()
+                st.rerun()
+            if insights and st.button("🗑️ 議事録の学習をリセット", key="meet_clear"):
+                storage.clear_meeting_insights()
+                st.success("議事録の学習データを消去しました。")
                 st.rerun()
 
 
