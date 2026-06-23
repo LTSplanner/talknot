@@ -23,10 +23,16 @@ def _service(credentials: Credentials):
     return build("drive", "v3", credentials=credentials, cache_discovery=False)
 
 
-def list_videos(credentials: Credentials, name_contains: str | None = None) -> list[dict]:
-    """アクセス可能な動画を新しい順で返す（共有ドライブ・共有アイテム含む）。
+def list_videos(
+    credentials: Credentials,
+    name_contains: str | None = None,
+    owned_only: bool = False,
+) -> list[dict]:
+    """アクセス可能な動画を新しい順で返す。
 
     name_contains を指定するとファイル名で絞り込む（例: "商談", "Meet"）。
+    owned_only=True のときは、**ログイン中ユーザー自身が所有する動画のみ**を返す
+    （共有された他人の動画・共有ドライブの動画は除外。プライバシー厳守用）。
     各要素: {id, name, createdTime, size, owner, webViewLink}
     """
     service = _service(credentials)
@@ -34,6 +40,13 @@ def list_videos(credentials: Credentials, name_contains: str | None = None) -> l
     if name_contains:
         safe = name_contains.replace("'", "\\'")
         query += f" and name contains '{safe}'"
+    if owned_only:
+        # 認証ユーザー本人が所有するファイルだけ（= 自分のアドレスに紐づく動画）。
+        query += " and 'me' in owners"
+
+    # 自分所有のみのときはマイドライブ範囲（共有ドライブ・共有アイテムを含めない）。
+    corpora = "user" if owned_only else "allDrives"
+    include_all = not owned_only
 
     files: list[dict] = []
     page_token = None
@@ -43,8 +56,8 @@ def list_videos(credentials: Credentials, name_contains: str | None = None) -> l
             service.files()
             .list(
                 q=query,
-                corpora="allDrives",
-                includeItemsFromAllDrives=True,
+                corpora=corpora,
+                includeItemsFromAllDrives=include_all,
                 supportsAllDrives=True,
                 fields=(
                     "nextPageToken, "

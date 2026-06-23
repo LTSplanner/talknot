@@ -292,21 +292,28 @@ def _render_drive_picker(creds, user: dict) -> None:
         "ファイル名で絞り込み（任意）", placeholder="例: 商談 / Meet / 顧客名",
     )
     try:
-        files = google_drive.list_videos(creds, name_contains=keyword.strip() or None)
+        # 自分が所有する（自分のアドレスに紐づく）動画のみ。他人の共有動画は出さない。
+        files = google_drive.list_videos(
+            creds, name_contains=keyword.strip() or None, owned_only=True
+        )
     except Exception as e:  # API エラーはユーザーに見せる
         st.error(f"ドライブの読み込みに失敗しました：{e}")
         return
 
+    # 念のための二重防御：所有者がログイン中ユーザー本人のものだけに限定する。
+    me = (user.get("email") or "").lower()
+    if me:
+        files = [f for f in files if (f.get("owner") or "").lower() in ("", me)]
+
     if not files:
         st.info(
-            "アクセスできる動画が見つかりませんでした。\n\n"
-            "Google の権限上、表示されるのは **あなたが所有 or あなたに共有された動画**、"
-            "および **参加している共有ドライブ** の動画だけです。"
-            "他メンバーの個人ドライブにある録画は、共有されるか共有ドライブに置かれるまで表示されません。"
+            "あなたが所有する動画が見つかりませんでした。\n\n"
+            "ここに表示されるのは **あなた自身のドライブにある（あなたが所有する）動画だけ** です。"
+            "他メンバーの商談動画は、たとえ共有されていても表示されません（プライバシー保護のため）。"
         )
         return
 
-    st.caption(f"アクセス可能な動画：{len(files)} 件")
+    st.caption(f"あなたが所有する動画：{len(files)} 件")
     labels = {}
     for f in files:
         owner = f.get("owner", "")
@@ -417,14 +424,16 @@ def _render_reference_own_drive_picker(creds) -> None:
         key="refown_keyword",
     )
     try:
-        files = google_drive.list_videos(creds, name_contains=keyword.strip() or None)
+        files = google_drive.list_videos(
+            creds, name_contains=keyword.strip() or None, owned_only=True
+        )
     except Exception as e:
         st.error(f"ドライブの読み込みに失敗しました：{e}")
         return
     if not files:
         st.info(
-            "アクセスできる動画が見つかりませんでした。"
-            "あなたが所有 or 共有された動画、参加中の共有ドライブの動画が対象です。"
+            "あなたが所有する動画が見つかりませんでした。"
+            "ここには **あなた自身のドライブにある動画だけ** が表示されます。"
         )
         return
     labels = {}
