@@ -102,6 +102,22 @@ def evaluation_result(result: EvaluationResult) -> None:
                 unsafe_allow_html=True,
             )
 
+    if result.hidden_needs:
+        st.markdown("##### 🔍 お客様の隠れたニーズ（秘密領域）")
+        st.caption(
+            "お客様が言葉にしていない不安・疑問を、非言語サインから読み取ったものです。"
+            "✅＝営業が踏み込めた／⚠️＝表面で流した。"
+        )
+        for h in result.hidden_needs:
+            caught = "✅ 踏み込めた" if h.surfaced else "⚠️ 取りこぼし"
+            head = f"⏱ {h.timestamp}　{caught}" if h.timestamp else caught
+            with st.expander(f"{head}　— {h.inferred_need}"):
+                if h.signal:
+                    st.caption(f"🫧 読み取ったサイン：{h.signal}")
+                st.markdown(f"**隠れたニーズ：** {h.inferred_need}")
+                if h.note:
+                    (st.info if h.surfaced else st.warning)(h.note)
+
     if result.summary:
         st.markdown("##### 全体の振り返り")
         st.success(result.summary)

@@ -16,6 +16,16 @@ def test_prompt_requires_timestamped_before_after():
         assert token in p
 
 
+def test_prompt_requests_hidden_needs_and_strict_scoring():
+    p = prompts.build_evaluation_prompt()
+    # 隠れたニーズ（秘密領域）の出力フィールド
+    for token in ["hidden_needs", "signal", "inferred_need", "surfaced", "秘密領域"]:
+        assert token in p
+    # 厳格採点のアンカー（甘い点を付けない方針）
+    for token in ["甘い", "2〜3", "非言語"]:
+        assert token in p
+
+
 def test_prompt_has_two_axis_fields():
     p = prompts.build_evaluation_prompt()
     for token in ["reference_score", "reference_comment", "sales_score", "sales_comment"]:

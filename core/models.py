@@ -37,6 +37,20 @@ class KnowledgeItem:
 
 
 @dataclass
+class HiddenNeed:
+    """お客様が言葉にしていない『隠れたニーズ（秘密領域）』の1項目。
+
+    非言語サイン（間・トーン・言い淀み・話題回避・過剰同意など）を根拠に、
+    お客様自身も自覚していない不安・疑問・本音を推定し、営業が踏み込めたかを見る。
+    """
+    timestamp: str          # "MM:SS"
+    signal: str             # 根拠となった非言語サイン
+    inferred_need: str      # 言葉にされていない不安・疑問・本音
+    surfaced: bool          # 営業がそれに気づき踏み込めたか
+    note: str               # 踏み込めた点 / 本来どう触れるべきだったか
+
+
+@dataclass
 class TimestampedFeedback:
     """『動画の何分何秒のトーク』単位の Before/After フィードバック。"""
     timestamp: str          # "MM:SS"
@@ -49,6 +63,7 @@ class TimestampedFeedback:
 @dataclass
 class EvaluationResult:
     scores: list[CriterionScore] = field(default_factory=list)
+    hidden_needs: list[HiddenNeed] = field(default_factory=list)  # 隠れたニーズ（秘密領域）
     feedback: list[TimestampedFeedback] = field(default_factory=list)
     summary: str = ""        # 全体講評（ポジティブな振り返り）
     knowledge: list[KnowledgeItem] = field(default_factory=list)  # 抽出した弊社ナレッジ
@@ -89,8 +104,24 @@ class EvaluationResult:
     @classmethod
     def from_dict(cls, data: dict) -> "EvaluationResult":
         """Gemini が返す JSON（core/prompts.py のフォーマット）からの復元。"""
+        def _bool(v) -> bool:
+            if isinstance(v, bool):
+                return v
+            return str(v).strip().lower() in ("true", "1", "yes", "はい", "○")
+
         return cls(
             scores=[cls._parse_score(s) for s in data.get("scores", [])],
+            hidden_needs=[
+                HiddenNeed(
+                    timestamp=h.get("timestamp", ""),
+                    signal=h.get("signal", ""),
+                    inferred_need=h.get("inferred_need", ""),
+                    surfaced=_bool(h.get("surfaced", False)),
+                    note=h.get("note", ""),
+                )
+                for h in data.get("hidden_needs", [])
+                if h.get("inferred_need")
+            ],
             feedback=[
                 TimestampedFeedback(
                     timestamp=f.get("timestamp", ""),
@@ -115,6 +146,7 @@ class EvaluationResult:
     def to_dict(self) -> dict:
         return {
             "scores": [vars(s) for s in self.scores],
+            "hidden_needs": [vars(h) for h in self.hidden_needs],
             "feedback": [vars(f) for f in self.feedback],
             "summary": self.summary,
             "knowledge": [vars(k) for k in self.knowledge],

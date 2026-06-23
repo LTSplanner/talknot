@@ -75,6 +75,31 @@ def test_from_dict_tolerates_missing_fields():
     assert r.knowledge == []
 
 
+def test_hidden_needs_parsed_and_roundtrips():
+    data = dict(SAMPLE)
+    data["hidden_needs"] = [
+        {
+            "timestamp": "05:40",
+            "signal": "予算の話で急に声が小さくなった",
+            "inferred_need": "本当は予算オーバーが不安",
+            "surfaced": "false",  # 文字列でも bool に変換される
+            "note": "金額の沈黙を拾って触れるべきだった",
+        },
+        {"inferred_need": ""},  # 中身が無い項目は捨てる
+    ]
+    r = EvaluationResult.from_dict(data)
+    assert len(r.hidden_needs) == 1
+    h = r.hidden_needs[0]
+    assert h.surfaced is False and h.inferred_need == "本当は予算オーバーが不安"
+    again = EvaluationResult.from_dict(r.to_dict())
+    assert again.hidden_needs[0].signal == "予算の話で急に声が小さくなった"
+    assert again.hidden_needs[0].surfaced is False
+
+
+def test_hidden_needs_default_empty():
+    assert EvaluationResult.from_dict({}).hidden_needs == []
+
+
 def test_knowledge_parsed_and_roundtrips():
     data = dict(SAMPLE)
     data["knowledge"] = [
