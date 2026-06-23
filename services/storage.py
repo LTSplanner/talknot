@@ -303,6 +303,44 @@ def _norm(text: str) -> str:
     return "".join(text.split()).lower()
 
 
+def add_knowledge_item(category: str, point: str) -> bool:
+    """手入力で知識を1件追加する（重複は弾く）。追加できたら True。"""
+    point = (point or "").strip()
+    if not point:
+        return False
+    items = _load_knowledge()
+    if any(_norm(i.get("point", "")) == _norm(point) for i in items):
+        return False
+    items.append({"category": category, "point": point})
+    _save_knowledge(items[-_KNOWLEDGE_MAX_ITEMS:])
+    return True
+
+
+def update_knowledge_item(old_point: str, category: str, point: str) -> bool:
+    """既存の知識1件を手入力で修正する（old_point で特定）。成功で True。"""
+    point = (point or "").strip()
+    if not point:
+        return False
+    items = _load_knowledge()
+    for it in items:
+        if it.get("point", "") == old_point:
+            it["category"] = category
+            it["point"] = point
+            _save_knowledge(items)
+            return True
+    return False
+
+
+def delete_knowledge_item(point: str) -> bool:
+    """知識1件を削除する（point で特定）。削除できたら True。"""
+    items = _load_knowledge()
+    remaining = [i for i in items if i.get("point", "") != point]
+    if len(remaining) == len(items):
+        return False
+    _save_knowledge(remaining)
+    return True
+
+
 def get_knowledge_items() -> list[dict]:
     """蓄積された知識を返す（カテゴリ・内容の dict のリスト）。"""
     return _load_knowledge()

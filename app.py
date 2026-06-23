@@ -604,11 +604,67 @@ def render_knowledge_tab(user: dict) -> None:
             st.markdown(f"**{label}**（{len(group)}件）")
             for p in group:
                 st.markdown(f"- {p}")
-        if settings.is_admin(user.get("email")):
-            if st.button("🗑️ 蓄積した知識をすべて消去", key="clear_knowledge"):
-                storage.clear_knowledge()
-                st.success("弊社ナレッジを消去しました。")
+
+    if settings.is_admin(user.get("email")):
+        _render_knowledge_items_admin(items)
+
+
+_CAT_KEYS = ["product", "rule", "technique"]
+_CAT_DISPLAY = {"product": "🏠 商品知識", "rule": "📏 社内ルール", "technique": "🗣️ トーク技術"}
+
+
+def _render_knowledge_items_admin(items: list[dict]) -> None:
+    """管理者向け：自動蓄積した知識を手入力で修正・削除・追加する。"""
+    with st.expander("✏️ 知識を手入力で修正・追加（管理者）"):
+        st.caption("AIが商談から抽出した知識を、人の手で正確に直せます（内容が混ざった項目の修正など）。")
+
+        # 既存項目を選んで修正・削除
+        if items:
+            labels = {
+                i: f"[{_CAT_DISPLAY.get(it.get('category',''), 'その他')[:2]}] {it.get('point','')[:50]}"
+                for i, it in enumerate(items)
+            }
+            sel = st.selectbox(
+                "修正する項目を選ぶ", options=list(labels), format_func=lambda i: labels[i],
+                key="ki_sel",
+            )
+            target = items[sel]
+            cat = st.selectbox(
+                "カテゴリ", _CAT_KEYS, index=_CAT_KEYS.index(target.get("category"))
+                if target.get("category") in _CAT_KEYS else 0,
+                format_func=lambda k: _CAT_DISPLAY[k], key="ki_cat",
+            )
+            text = st.text_area("内容", value=target.get("point", ""), key="ki_text", height=120)
+            c1, c2 = st.columns(2)
+            with c1:
+                if st.button("💾 この項目を更新", key="ki_update", use_container_width=True):
+                    if storage.update_knowledge_item(target.get("point", ""), cat, text):
+                        st.success("更新しました。")
+                        st.rerun()
+                    else:
+                        st.error("更新できませんでした（内容が空か、項目が見つかりません）。")
+            with c2:
+                if st.button("🗑️ この項目を削除", key="ki_delete", use_container_width=True):
+                    if storage.delete_knowledge_item(target.get("point", "")):
+                        st.success("削除しました。")
+                        st.rerun()
+
+        # 新規に手入力で追加
+        st.markdown("**＋ 新しい知識を追加**")
+        ncat = st.selectbox("カテゴリ", _CAT_KEYS, format_func=lambda k: _CAT_DISPLAY[k], key="ki_ncat")
+        ntext = st.text_area("内容", key="ki_ntext", height=80, placeholder="例：水廻りコーティングの正式名称は…")
+        if st.button("➕ 追加する", key="ki_add"):
+            if storage.add_knowledge_item(ncat, ntext):
+                st.success("追加しました。")
                 st.rerun()
+            else:
+                st.error("追加できませんでした（空、または既に同じ内容があります）。")
+
+        st.divider()
+        if items and st.button("🗑️ 蓄積した知識をすべて消去", key="clear_knowledge"):
+            storage.clear_knowledge()
+            st.success("弊社ナレッジを消去しました。")
+            st.rerun()
 
 
 def _render_knowledge_doc_admin(user: dict, has_doc: bool) -> None:

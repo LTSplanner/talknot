@@ -102,6 +102,21 @@ def test_knowledge_clear(tmp_storage):
     assert storage.get_knowledge_items() == []
 
 
+def test_knowledge_item_manual_add_update_delete(tmp_storage):
+    assert storage.add_knowledge_item("product", "保証は10年") is True
+    assert storage.add_knowledge_item("product", "保証は10年 ") is False  # 重複
+    assert storage.add_knowledge_item("rule", "") is False                # 空はNG
+    # 修正
+    assert storage.update_knowledge_item("保証は10年", "rule", "保証は最長10年") is True
+    pts = [i["point"] for i in storage.get_knowledge_items()]
+    assert "保証は最長10年" in pts and "保証は10年" not in pts
+    assert storage.get_knowledge_items()[0]["category"] == "rule"
+    # 削除
+    assert storage.delete_knowledge_item("保証は最長10年") is True
+    assert storage.get_knowledge_items() == []
+    assert storage.delete_knowledge_item("存在しない") is False
+
+
 def test_knowledge_doc_set_get_clear(tmp_storage):
     assert storage.get_knowledge_doc() == ""
     storage.set_knowledge_doc("  料金は実見積ベースで案内する  ")
