@@ -32,6 +32,20 @@ def test_prompt_has_two_axis_fields():
         assert token in p
 
 
+def test_prompt_axes_are_differentiated():
+    """2軸が別の物差しで、同点にしないよう指示しているか。"""
+    p = prompts.build_evaluation_prompt()
+    for token in ["別の物差し", "再現度", "本質的な質", "同じ数字にしない"]:
+        assert token in p
+
+
+def test_reference_axis_note_changes_with_reference_talk():
+    with_ref = prompts.build_evaluation_prompt(reference_talk="模範です")
+    without = prompts.build_evaluation_prompt()
+    assert "再現できたか" in with_ref       # 登録模範トークの再現度
+    assert "基本の型" in without            # 未登録時は基本の型が基準
+
+
 def test_prompt_uses_sales_persona():
     p = prompts.build_evaluation_prompt()
     assert settings.SALES_AI_PERSONA[:20] in p

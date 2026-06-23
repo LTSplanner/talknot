@@ -26,9 +26,9 @@ def build_evaluation_prompt(
         else ""
     )
     reference_axis_note = (
-        "reference（🎯 模範トーク視点）は、上の『模範トーク』と比べてどれだけ近づけたかで採点する。"
+        "上の『模範トーク』の型・流れ・言い回し・技術をどれだけ再現できたか（似ているか）で採点する。"
         if reference_talk
-        else "reference（🎯 模範トーク視点）は、住宅営業トップの理想トークを基準に、どれだけ近いかで採点する（模範トーク未登録のため理想像を基準にする）。"
+        else "住宅営業の基本の型（あいさつ→ヒアリング→提案→次の一歩）にどれだけ沿えたかで採点する（模範トーク未登録のため基本の型を基準）。"
     )
     return f"""{settings.SALES_AI_PERSONA}
 
@@ -57,10 +57,13 @@ def build_evaluation_prompt(
 - 大半の実商談は 2〜3 に収まる。4〜5 は具体的なタイムスタンプの根拠がある場合のみ。
 - reference・sales の両軸とも、このアンカーで厳格に採点する。
 
-# 評価の2軸（各項目を、必ず次の2つの視点それぞれで 1〜5 段階で採点する）
-- reference（🎯 模範トーク視点）：{settings.AXES_BY_KEY['reference'].description}
-- sales（💼 営業プロ視点）：{settings.AXES_BY_KEY['sales'].description}
-{reference_axis_note}
+# 評価の2軸（必ず“別の物差し”で 1〜5 採点する。安易に同じ点にしない）
+- reference（🎯 模範トーク視点）＝再現度：{reference_axis_note}
+- sales（💼 営業プロ視点）＝本質的な質：模範に関係なく、お客様目線で見たトークそのものの完成度。
+※この2軸は測るものが違うため、点数は一致しないことが多い。例：
+  ・模範とは違うやり方だが上手い → sales 高め / reference 低め。
+  ・模範の型はなぞれたが、目の前のお客様には響いていない → reference 高め / sales 低め。
+  両軸を機械的に同じ数字にしないこと。reference_comment と sales_comment は別々の根拠で書く。
 
 # 評価項目
 {criteria_lines}

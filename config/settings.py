@@ -202,13 +202,14 @@ EVALUATION_AXES: list[Axis] = [
     Axis(
         key="reference",
         title="模範トーク視点",
-        description="登録された模範トーク（無ければ住宅営業トップの理想トーク）と比べて、どれだけ近づけたか。",
+        description="登録した模範トークの“型・流れ・技術”をどれだけ再現できたか（再現度）。"
+        "未登録なら住宅営業の基本の型に沿えたか。",
         icon="🎯",
     ),
     Axis(
         key="sales",
         title="営業プロ視点",
-        description="住宅営業のトップセールス兼コーチとして見た、その項目の完成度。",
+        description="模範に関係なく、お客様目線で見たトークそのものの本質的な質・完成度。",
         icon="💼",
     ),
 ]
