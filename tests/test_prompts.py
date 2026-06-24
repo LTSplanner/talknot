@@ -16,6 +16,11 @@ def test_prompt_requires_timestamped_before_after():
         assert token in p
 
 
+def test_prompt_forces_japanese_output():
+    p = prompts.build_evaluation_prompt()
+    assert "日本語で書いて" in p and "英語を混ぜない" in p
+
+
 def test_prompt_requests_hidden_needs_and_strict_scoring():
     p = prompts.build_evaluation_prompt()
     # 隠れたニーズ（秘密領域）の出力フィールド
