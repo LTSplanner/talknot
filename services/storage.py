@@ -695,6 +695,29 @@ def fail_evaluation(
     })
 
 
+# 『処理中』のまま残った（再起動でスレッドが死んだ等）レコードを、この分数を超えたら
+# 表示上はタイムアウト失敗として扱う。永遠に「判定中」が出続けるのを防ぐ。
+_PROCESSING_TIMEOUT_MIN = 60
+
+
+def _apply_processing_timeout(rec: dict) -> dict:
+    """『処理中』が規定時間より古ければ、表示上は失敗（タイムアウト）に変える。"""
+    if rec.get("status") != "processing":
+        return rec
+    saved = rec.get("saved_at", "")
+    try:
+        t = time.mktime(time.strptime(saved, "%Y-%m-%d %H:%M:%S"))
+    except (ValueError, TypeError):
+        return rec
+    if (time.time() - t) > _PROCESSING_TIMEOUT_MIN * 60:
+        rec = dict(rec)
+        rec["status"] = "error"
+        rec["error"] = (rec.get("error") or
+                        "時間内に完了しませんでした（サーバー再起動や一時的な高負荷の可能性）。"
+                        "もう一度評価してください。")
+    return rec
+
+
 def list_evaluations(user_email: str) -> list[dict]:
     """指定ユーザーの評価履歴を新しい順で返す（各自のみ。他人の評価は返さない）。"""
     if _use_eval_sheets():
@@ -715,7 +738,7 @@ def list_evaluations(user_email: str) -> list[dict]:
                     rec["result"] = json.loads(r["result_json"])
                 except json.JSONDecodeError:
                     rec["result"] = None
-            records.append(rec)
+            records.append(_apply_processing_timeout(rec))
         return records
 
     prefix_name = _safe(user_email)

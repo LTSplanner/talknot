@@ -76,6 +76,8 @@ def analyze(
             # 動画は声・間が読めれば十分。映像解像度を下げてトークン消費を大幅削減し、
             # 長尺の商談録画でも上限/無料枠に当たりにくくする（軽量化重視）。
             media_resolution=types.MediaResolution.MEDIA_RESOLUTION_LOW,
+            # 出力(JSON)が途中で切れて parse 失敗するのを防ぐため上限を広げる。
+            max_output_tokens=16384,
         ),
     )
 
