@@ -40,7 +40,7 @@ def test_prompt_has_two_axis_fields():
 def test_prompt_axes_are_differentiated():
     """2軸が別の物差しで、同点にしないよう指示しているか。"""
     p = prompts.build_evaluation_prompt()
-    for token in ["別の物差し", "再現度", "本質的な質", "同じ数字にしない"]:
+    for token in ["別の物差し", "再現度", "本質的な質", "独立に"]:
         assert token in p
 
 
