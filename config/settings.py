@@ -119,6 +119,15 @@ KNOWLEDGE_FOLDER_ID = os.getenv(
 MINUTES_FOLDER_ID = os.getenv("MINUTES_FOLDER_ID", "14yefycrO6ylPVT0LAqbh10HjrDV-9FDd")
 # 議事録抽出に使うモデル（無料枠の広いものを推奨）。
 MINUTES_EXTRACT_MODEL = os.getenv("MINUTES_EXTRACT_MODEL", "gemini-2.5-flash-lite")
+
+# --- LTS共通「利用ログ」への記録 ---
+# 誰が・どのツールを・いつ使ったかを共通シートに集約する。
+USAGE_LOG_SHEET_ID = os.getenv(
+    "USAGE_LOG_SHEET_ID", "17et2dnkgLsxpb9cdbKgDRmmkI5hB_LYyMYtqxZhIhUU"
+)
+USAGE_LOG_TAB = os.getenv("USAGE_LOG_TAB", "利用ログ")
+# ツール台帳の左端IDと一致させる（未登録なら台帳に1行足して決める）。
+USAGE_LOG_TOOL_ID = os.getenv("USAGE_LOG_TOOL_ID", "talknot")
 SHEETS_SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 # 評価履歴の永続化先シート。未設定なら KNOWLEDGE_SHEET_ID と同じシート（Evaluations タブ）。
 # 将来「評価専用の別シート」に分けたくなったら、ここに別シートIDを設定するだけ。

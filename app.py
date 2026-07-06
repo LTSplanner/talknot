@@ -34,7 +34,7 @@ except Exception:
 from auth import google_oauth, persist, session  # noqa: E402
 from config import settings  # noqa: E402
 from core.models import EvaluationResult  # noqa: E402
-from services import drive_sa, gemini_analyzer, google_drive, storage  # noqa: E402
+from services import drive_sa, gemini_analyzer, google_drive, storage, usage_log  # noqa: E402
 from ui import components, theme  # noqa: E402
 
 st.set_page_config(
@@ -180,8 +180,10 @@ def _analyze_worker(
         storage.finish_evaluation(user_email, job_id, result, label)
         # 商談から抽出した弊社ナレッジを蓄積（使うほど評価が弊社仕様に賢くなる）
         storage.append_knowledge(result.knowledge)
+        usage_log.log("evaluate", user_email=user_email, ok=True, source="streamlit-bg")
     except Exception as exc:  # API/ダウンロードエラー等。失敗として履歴に残す。
         storage.fail_evaluation(user_email, job_id, _friendly_gemini_error(exc), label)
+        usage_log.log("evaluate", user_email=user_email, ok=False, source="streamlit-bg")
     finally:
         if tmp_path:
             Path(tmp_path).unlink(missing_ok=True)
@@ -771,6 +773,11 @@ def _render_meeting_admin(user: dict) -> None:
 
 
 def render_app(user: dict) -> None:
+    # LTS共通の利用ログに「起動」を1セッション1回だけ記録（失敗しても本体は止めない）
+    if not st.session_state.get("_usage_logged"):
+        usage_log.log("open", user_email=user.get("email", ""), source="streamlit")
+        st.session_state["_usage_logged"] = True
+
     components.sidebar(user)
     components.hero(compact=True)
 
