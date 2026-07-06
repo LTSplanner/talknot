@@ -100,6 +100,23 @@ def test_hidden_needs_default_empty():
     assert EvaluationResult.from_dict({}).hidden_needs == []
 
 
+def test_johari_parsed_and_roundtrips():
+    data = dict(SAMPLE)
+    data["johari"] = {
+        "open_pct": "40", "blind_pct": 30, "hidden_pct": 20, "unknown_pct": 10,
+        "comment": "秘密領域にもっと時間を",
+    }
+    r = EvaluationResult.from_dict(data)
+    assert r.johari is not None
+    assert r.johari.open_pct == 40 and r.johari.value_pct == 50  # 盲点30+秘密20
+    again = EvaluationResult.from_dict(r.to_dict())
+    assert again.johari.hidden_pct == 20 and again.johari.comment == "秘密領域にもっと時間を"
+
+
+def test_johari_absent_is_none():
+    assert EvaluationResult.from_dict({}).johari is None
+
+
 def test_knowledge_parsed_and_roundtrips():
     data = dict(SAMPLE)
     data["knowledge"] = [

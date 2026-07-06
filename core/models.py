@@ -37,6 +37,25 @@ class KnowledgeItem:
 
 
 @dataclass
+class JohariAllocation:
+    """商談の会話時間を『ジョハリの窓』4領域に配分した割合（合計≒100）。
+
+    良い商談は、開放領域（既知の確認）だけでなく、盲点領域（プロからの提案・気づき）と
+    秘密領域（お客様の本音・事情の引き出し）に時間を割けている。
+    """
+    open_pct: int      # 開放領域：双方が知っている（既知の確認）
+    blind_pct: int     # 盲点領域：お客様が気づいていない（プロの提案・気づき）
+    hidden_pct: int    # 秘密領域：お客様の本音・事情（引き出すべき）
+    unknown_pct: int   # 未知領域：双方が知らない（対話で新発見）
+    comment: str       # 配分の講評（盲点・秘密にもっと時間を割くには等）
+
+    @property
+    def value_pct(self) -> int:
+        """価値創出ゾーン（盲点＋秘密）の割合。"""
+        return self.blind_pct + self.hidden_pct
+
+
+@dataclass
 class HiddenNeed:
     """お客様が言葉にしていない『隠れたニーズ（秘密領域）』の1項目。
 
@@ -63,6 +82,7 @@ class TimestampedFeedback:
 @dataclass
 class EvaluationResult:
     scores: list[CriterionScore] = field(default_factory=list)
+    johari: "JohariAllocation | None" = None  # 会話配分（ジョハリの窓）
     hidden_needs: list[HiddenNeed] = field(default_factory=list)  # 隠れたニーズ（秘密領域）
     feedback: list[TimestampedFeedback] = field(default_factory=list)
     summary: str = ""        # 全体講評（ポジティブな振り返り）
@@ -109,8 +129,28 @@ class EvaluationResult:
                 return v
             return str(v).strip().lower() in ("true", "1", "yes", "はい", "○")
 
+        def _int(v) -> int:
+            try:
+                return int(float(v or 0))
+            except (TypeError, ValueError):
+                return 0
+
+        johari = None
+        j = data.get("johari")
+        if isinstance(j, dict) and any(
+            k in j for k in ("open_pct", "blind_pct", "hidden_pct", "unknown_pct")
+        ):
+            johari = JohariAllocation(
+                open_pct=_int(j.get("open_pct")),
+                blind_pct=_int(j.get("blind_pct")),
+                hidden_pct=_int(j.get("hidden_pct")),
+                unknown_pct=_int(j.get("unknown_pct")),
+                comment=j.get("comment", ""),
+            )
+
         return cls(
             scores=[cls._parse_score(s) for s in data.get("scores", [])],
+            johari=johari,
             hidden_needs=[
                 HiddenNeed(
                     timestamp=h.get("timestamp", ""),
@@ -146,6 +186,7 @@ class EvaluationResult:
     def to_dict(self) -> dict:
         return {
             "scores": [vars(s) for s in self.scores],
+            "johari": vars(self.johari) if self.johari else None,
             "hidden_needs": [vars(h) for h in self.hidden_needs],
             "feedback": [vars(f) for f in self.feedback],
             "summary": self.summary,

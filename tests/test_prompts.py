@@ -16,6 +16,13 @@ def test_prompt_requires_timestamped_before_after():
         assert token in p
 
 
+def test_prompt_requests_johari_allocation():
+    p = prompts.build_evaluation_prompt()
+    for token in ["johari", "open_pct", "blind_pct", "hidden_pct", "unknown_pct",
+                  "開放領域", "盲点領域", "秘密領域", "未知領域"]:
+        assert token in p
+
+
 def test_prompt_forces_japanese_output():
     p = prompts.build_evaluation_prompt()
     assert "日本語で書いて" in p and "英語を混ぜない" in p
