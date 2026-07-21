@@ -1,0 +1,101 @@
+"""模範トークスクリプト（Googleスプレッドシート）を TalKnot に取り込む。
+
+1人ロープレの「🎯模範トーク視点」の採点基準になる社内標準スクリプト。
+複数ブック・複数タブをまとめて1本のテキストに統合して保存する。
+
+- 読み取りは DWD サービスアカウント（drive.readonly）で、ブックを xlsx で書き出して解析。
+  ※Sheets スコープが委任されていないため、Drive のエクスポート経由で取得する。
+- 保存先は storage の script セクション（KNOWLEDGE_SHEET_ID 設定時は共有シートの
+  TalkScript タブ）。スクリプトが増えたら再実行すれば丸ごと更新される。
+
+使い方:
+    python3 scripts/import_talk_scripts.py [--dry-run]
+"""
+from __future__ import annotations
+
+import argparse
+import io
+import sys
+import urllib.request
+
+from google.auth.transport.requests import Request
+from google.oauth2 import service_account
+
+from config import settings
+from services import storage
+
+# 取り込む模範トークスクリプトのブック（タイトルはログ表示用）
+SCRIPT_BOOKS = [
+    ("1bUrsQxKIg7DZc-DANvHRqR4ygeEQEOvckZTpeGlmyEs", "商材別トークスクリプト"),
+    ("1A92RANfvc9zQz18b9aG4fnSlurKAqBVr0iWAzGSAX1k", "説明トーク（部品別）"),
+]
+SUBJECT = "planner@life-time-support.com"
+HEADER = "===== 模範トークスクリプト（社内標準） ====="
+
+
+def _token() -> str:
+    if not settings.GOOGLE_SERVICE_ACCOUNT_FILE:
+        sys.exit("GOOGLE_SERVICE_ACCOUNT_FILE が未設定です。")
+    creds = service_account.Credentials.from_service_account_file(
+        settings.GOOGLE_SERVICE_ACCOUNT_FILE,
+        scopes=["https://www.googleapis.com/auth/drive.readonly"],
+        subject=SUBJECT,
+    )
+    creds.refresh(Request())
+    return creds.token
+
+
+def _book_text(sheet_id: str, token: str) -> tuple[list[tuple[str, str]], int]:
+    """ブックを xlsx で取得し、[(タブ名, 本文)] と合計文字数を返す。"""
+    import openpyxl
+
+    req = urllib.request.Request(
+        f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=xlsx",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    wb = openpyxl.load_workbook(io.BytesIO(urllib.request.urlopen(req, timeout=120).read()),
+                                data_only=True)
+    out: list[tuple[str, str]] = []
+    total = 0
+    for name in wb.sheetnames:
+        cells = []
+        for row in wb[name].iter_rows(values_only=True):
+            for c in row:
+                if c and str(c).strip():
+                    cells.append(str(c).strip())
+        body = "\n".join(cells).strip()
+        if body:
+            out.append((name, body))
+            total += len(body)
+    return out, total
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--dry-run", action="store_true")
+    args = ap.parse_args()
+
+    token = _token()
+    parts = [HEADER]
+    grand = 0
+    for sheet_id, title in SCRIPT_BOOKS:
+        tabs, total = _book_text(sheet_id, token)
+        grand += total
+        parts.append(f"\n\n──────── 【{title}】 ────────")
+        print(f"■ {title}: {len(tabs)}タブ / {total:,}字")
+        for name, body in tabs:
+            print(f"    - {name} … {len(body):,}字")
+            parts.append(f"\n■ {name}\n{body}")
+
+    doc = "\n".join(parts)
+    print(f"\n統合後: {len(doc):,} 文字（≈ {len(doc)//3:,} tokens 目安）")
+    if args.dry_run:
+        print("--dry-run のため保存しません。")
+        return
+    storage.set_talk_script(doc)
+    where = "共有シートの TalkScript タブ" if storage._use_sheets() else "ローカル/GCS"
+    print(f"💾 保存しました → {where}（読み戻し {len(storage.get_talk_script()):,} 字）")
+
+
+if __name__ == "__main__":
+    main()
