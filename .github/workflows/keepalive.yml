@@ -1,0 +1,29 @@
+name: keep-alive
+
+# Streamlit Community Cloud は無停止のアクセスが無いとスリープし、
+# 次の利用者が「起こす」ために30秒〜1分待たされる。
+# 6時間ごとに軽くアクセスしてスリープを防ぐ（無料・アプリ側の変更不要）。
+
+on:
+  schedule:
+    - cron: "0 */6 * * *"   # 6時間ごと（UTC）
+  workflow_dispatch:        # 手動でも実行できる
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping TalKnot
+        run: |
+          URL="https://talknot-lts.streamlit.app"
+          for i in 1 2 3; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" -L --max-time 90 "$URL" || echo "000")
+            echo "attempt $i -> HTTP $code"
+            if [ "$code" = "200" ]; then
+              echo "awake"
+              exit 0
+            fi
+            sleep 30
+          done
+          # 起こせなくてもワークフローは失敗にしない（通知を鳴らさない）
+          echo "ping did not return 200 ; will retry on next schedule"
