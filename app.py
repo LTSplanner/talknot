@@ -585,7 +585,7 @@ def _speak(text: str, key: str) -> None:
         <div style="display:flex;gap:.5rem;align-items:center">
           <button id="sp{key}" style="cursor:pointer;border:1px solid #6C5CE7;color:#6C5CE7;
             background:#fff;border-radius:999px;padding:.35rem .9rem;font-size:.85rem">
-            🔊 お客様の声で聞く
+            ▶️ お客様のセリフを再生
           </button>
           <span id="st{key}" style="font-size:.78rem;color:#8C8794"></span>
         </div>
@@ -594,20 +594,46 @@ def _speak(text: str, key: str) -> None:
           const text = {payload};
           const btn = document.getElementById("sp{key}");
           const tag = document.getElementById("st{key}");
+
+          // 日本語音声の中から、より自然なものを優先して選ぶ
+          function pickVoice() {{
+            const vs = window.speechSynthesis.getVoices()
+              .filter(v => v.lang && v.lang.toLowerCase().indexOf("ja") === 0);
+            if (!vs.length) return null;
+            const pref = ["Google 日本語", "Google", "Otoya", "O-Ren", "Kyoko", "Ayumi", "Nanami", "Haruka"];
+            for (const p of pref) {{
+              const hit = vs.find(v => v.name && v.name.indexOf(p) >= 0);
+              if (hit) return hit;
+            }}
+            return vs[0];
+          }}
+
           function speak() {{
             try {{
               window.speechSynthesis.cancel();
-              const u = new SpeechSynthesisUtterance(text);
-              u.lang = "ja-JP"; u.rate = 1.0; u.pitch = 1.05;
-              const jp = window.speechSynthesis.getVoices().filter(v => v.lang && v.lang.indexOf("ja") === 0);
-              if (jp.length) u.voice = jp[0];
-              u.onstart = () => tag.textContent = "🗣 話しています…";
-              u.onend = () => tag.textContent = "";
-              window.speechSynthesis.speak(u);
+              // 句読点で自然な間ができるよう、文単位に分けて読ませる
+              const chunks = text.split(/(?<=[。！？\\n])/).filter(s => s.trim());
+              const voice = pickVoice();
+              tag.textContent = "🗣 話しています…";
+              chunks.forEach((c, i) => {{
+                const u = new SpeechSynthesisUtterance(c.trim());
+                u.lang = "ja-JP";
+                u.rate = 0.95;   // 少しゆっくりで聞き取りやすく
+                u.pitch = 1.0;   // 不自然な高さにしない
+                u.volume = 1.0;
+                if (voice) u.voice = voice;
+                if (i === chunks.length - 1) u.onend = () => tag.textContent = "";
+                window.speechSynthesis.speak(u);
+              }});
             }} catch (e) {{ tag.textContent = "この端末では音声が使えません"; }}
           }}
+
           btn.onclick = speak;
-          setTimeout(speak, 400);   // 自動再生を試す（ブロックされたらボタンで）
+          // 音声一覧は非同期で読み込まれるため、準備できたら差し替える
+          if (window.speechSynthesis.onvoiceschanged !== undefined) {{
+            window.speechSynthesis.onvoiceschanged = pickVoice;
+          }}
+          // ※自動再生はしない。必ずボタンを押したときだけ再生する。
         }})();
         </script>
         """,
