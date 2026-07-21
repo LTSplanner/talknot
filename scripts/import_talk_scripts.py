@@ -76,25 +76,26 @@ def main() -> None:
     args = ap.parse_args()
 
     token = _token()
-    parts = [HEADER]
+    items: list[dict] = []
     grand = 0
     for sheet_id, title in SCRIPT_BOOKS:
         tabs, total = _book_text(sheet_id, token)
         grand += total
-        parts.append(f"\n\n──────── 【{title}】 ────────")
         print(f"■ {title}: {len(tabs)}タブ / {total:,}字")
         for name, body in tabs:
             print(f"    - {name} … {len(body):,}字")
-            parts.append(f"\n■ {name}\n{body}")
+            items.append({"book": title, "tab": name, "body": body})
 
-    doc = "\n".join(parts)
-    print(f"\n統合後: {len(doc):,} 文字（≈ {len(doc)//3:,} tokens 目安）")
+    print(f"\n単元数: {len(items)} / 合計 {grand:,} 文字（≈ {grand//3:,} tokens 目安）")
     if args.dry_run:
         print("--dry-run のため保存しません。")
         return
-    storage.set_talk_script(doc)
-    where = "共有シートの TalkScript タブ" if storage._use_sheets() else "ローカル/GCS"
-    print(f"💾 保存しました → {where}（読み戻し {len(storage.get_talk_script()):,} 字）")
+    # 単元（元スプシのタブ）ごとに1行で保存 → 中身をタブ単位で確認・修正できる
+    storage.set_talk_script_items(items)
+    where = "共有シートの TalkScripts タブ" if storage._use_sheets() else "ローカル"
+    print(f"💾 保存しました → {where}"
+          f"（読み戻し {len(storage.get_talk_script_items())} 単元 / "
+          f"連結 {len(storage.get_talk_script()):,} 字）")
 
 
 if __name__ == "__main__":

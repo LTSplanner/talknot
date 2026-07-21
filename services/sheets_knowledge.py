@@ -296,6 +296,53 @@ def save_meeting_insights(items: list[dict]) -> None:
     ).execute()
 
 
+# --------------------------------------------------------------------------- #
+# 模範トークスクリプト（元スプレッドシートのタブ＝単元ごとに1行で保存）
+# 列: book, tab, chars, body
+# --------------------------------------------------------------------------- #
+_SCRIPT_TAB = "TalkScripts"
+_SCRIPT_HEADER = ["book", "tab", "chars", "body"]
+
+
+def load_talk_scripts() -> list[dict]:
+    svc = _service()
+    try:
+        resp = (
+            svc.spreadsheets()
+            .values()
+            .get(spreadsheetId=_cfg("KNOWLEDGE_SHEET_ID"), range=f"{_SCRIPT_TAB}!A2:D")
+            .execute()
+        )
+    except Exception:
+        return []
+    out = []
+    for row in resp.get("values", []):
+        def c(i):
+            return (row[i] if len(row) > i else "").strip()
+
+        if not c(3):
+            continue
+        out.append({"book": c(0), "tab": c(1), "body": c(3)})
+    return out
+
+
+def save_talk_scripts(items: list[dict]) -> None:
+    svc = _service()
+    _ensure_tab(svc, _SCRIPT_TAB)
+    sid = _cfg("KNOWLEDGE_SHEET_ID")
+    svc.spreadsheets().values().clear(
+        spreadsheetId=sid, range=f"{_SCRIPT_TAB}!A:D"
+    ).execute()
+    values = [_SCRIPT_HEADER] + [
+        [it.get("book", ""), it.get("tab", ""), len(it.get("body", "")), it.get("body", "")]
+        for it in items
+    ]
+    svc.spreadsheets().values().update(
+        spreadsheetId=sid, range=f"{_SCRIPT_TAB}!A1",
+        valueInputOption="RAW", body={"values": values},
+    ).execute()
+
+
 def load() -> list[dict]:
     """シート全体を読み、知識項目の dict リストを返す。"""
     svc = _service()

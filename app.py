@@ -572,10 +572,11 @@ def _start_roleplay_job(user: dict, scenario: dict, audio_turns: list) -> None:
     job_id = time.strftime("%Y%m%d_%H%M%S") + "_" + uuid.uuid4().hex[:6]
     label = f"🎙️1人ロープレ｜{scenario.get('title','')}"
     storage.start_evaluation(user["email"], job_id, label)
+    lines = [t["customer"] for t in storage.scenario_turns(scenario)]
     threading.Thread(
         target=_roleplay_worker,
         kwargs=dict(job_id=job_id, user_email=user["email"], label=label,
-                    audio_turns=audio_turns, scenario_lines=scenario.get("lines", [])),
+                    audio_turns=audio_turns, scenario_lines=lines),
         daemon=True,
     ).start()
 
@@ -593,23 +594,34 @@ def render_roleplay_tab(user: dict) -> None:
     )
 
     scenarios = storage.get_scenarios()
-    titles = {s["id"]: s.get("title", s["id"]) for s in scenarios}
-    sid = st.selectbox(
-        "シナリオを選ぶ", options=list(titles), format_func=lambda i: titles[i],
-        key="rp_scenario", disabled=bool(st.session_state.get("rp_audio")),
-    )
-    scenario = storage.get_scenario(sid) or scenarios[0]
-    lines = scenario.get("lines", [])
+    # 商材・単元ごとにグループ分けしてプルダウンを見やすくする
+    groups: dict[str, list[dict]] = {}
+    for s in scenarios:
+        groups.setdefault(s.get("group", "総合"), []).append(s)
+    locked = bool(st.session_state.get("rp_audio"))
+    gcol, scol = st.columns([1, 2])
+    with gcol:
+        group = st.selectbox("カテゴリ", list(groups), key="rp_group", disabled=locked)
+    with scol:
+        items = groups[group]
+        titles = {s["id"]: s.get("title", s["id"]) for s in items}
+        sid = st.selectbox("単元を選ぶ", options=list(titles),
+                           format_func=lambda i: titles[i], key="rp_scenario", disabled=locked)
+    scenario = storage.get_scenario(sid) or items[0]
+    turns = storage.scenario_turns(scenario)
     if not storage.get_talk_script():
         st.caption("⚠️ 模範トークスクリプトが未登録です（下の管理者欄で登録すると、その型を基準に採点します）。")
 
+    practice = st.toggle("🔰 練習モード（カンペを最初から表示）", value=False, key="rp_practice")
+
     audio = st.session_state.setdefault("rp_audio", [])
+    used = st.session_state.setdefault("rp_hint_used", [])
     turn = len(audio)
 
-    if turn < len(lines):
+    if turn < len(turns):
         st.divider()
-        st.caption(f"ターン {turn + 1} / {len(lines)}")
-        st.markdown(f"#### 🧑 お客様\n> {lines[turn]}")
+        st.caption(f"ターン {turn + 1} / {len(turns)}")
+        st.markdown(f"#### 🧑 お客様\n> {turns[turn]['customer']}")
 
         ready_key = f"rp_ready_{turn}"
         if not st.session_state.get(ready_key):
@@ -624,13 +636,30 @@ def render_roleplay_tab(user: dict) -> None:
                 st.rerun()
         else:
             rec = st.audio_input("マイクを押して話す（1ターン40秒以内が目安）", key=f"rp_rec_{turn}")
-            if rec is not None:
-                if st.button("✅ このターンを確定して次へ", key=f"rp_next_{turn}",
-                             use_container_width=True):
-                    audio.append(rec.getvalue())
-                    st.rerun()
+            if rec is not None and st.button("✅ このターンを確定して次へ", key=f"rp_next_{turn}",
+                                             use_container_width=True):
+                audio.append(rec.getvalue())
+                used.append(bool(practice or st.session_state.get(f"rp_hint_{turn}")))
+                st.rerun()
+
+        # --- カンペ（見ずに言えたら次のステップへ）---
+        hint = (turns[turn].get("hint") or "").strip()
+        if hint:
+            show = practice or st.checkbox("📋 カンペを見る（見ずに言えたら次のステップ）",
+                                           key=f"rp_hint_{turn}")
+            if show:
+                st.info(hint)
+            else:
+                st.caption("💡 まずは自分の言葉で。詰まったら上のチェックでカンペを開けます。")
     else:
-        st.success(f"全 {len(lines)} ターン録音できました。評価に進めます。")
+        no_hint = sum(1 for u in used if not u)
+        st.success(f"全 {len(turns)} ターン録音できました。評価に進めます。")
+        st.markdown(f"**カンペなしで言えた：{no_hint} / {len(turns)} ターン**")
+        if used and no_hint == len(used):
+            st.balloons()
+            st.success("🎉 カンペなしで完走！次の単元にステップアップしましょう。")
+        elif no_hint:
+            st.caption("💪 いい調子です。次はカンペを開く回数を減らしてみましょう。")
 
     st.divider()
     c1, c2 = st.columns(2)
@@ -650,23 +679,47 @@ def render_roleplay_tab(user: dict) -> None:
 
 
 def _render_script_admin() -> None:
-    """管理者向け：模範トークスクリプトの登録（ロープレ評価の基準になる）。"""
-    with st.expander("📝 模範トークスクリプトを登録（管理者）"):
-        st.caption("研修で標準化したトークスクリプトを貼ってください。ロープレ評価の"
-                   "🎯模範トーク視点は、この型をどれだけ再現できたかで採点されます。")
-        current = storage.get_talk_script()
-        text = st.text_area("トークスクリプト本文", value=current, height=260, key="rp_script")
-        c1, c2 = st.columns(2)
-        with c1:
-            if st.button("💾 保存する", key="rp_script_save", use_container_width=True):
+    """管理者向け：模範トークスクリプトを『単元ごと』に確認・修正する。"""
+    with st.expander("📝 模範トークスクリプトを確認・修正（管理者）"):
+        items = storage.get_talk_script_items()
+        if not items:
+            st.caption("まだ登録されていません。研修で標準化したスクリプトを貼って保存してください。")
+            text = st.text_area("トークスクリプト本文", value="", height=220, key="rp_script_new")
+            if st.button("💾 保存する", key="rp_script_save_new"):
                 storage.set_talk_script(text)
                 st.success(f"保存しました（{len(text.strip()):,} 文字）。")
                 st.rerun()
-        with c2:
-            if current and st.button("🗑️ 消去", key="rp_script_clear", use_container_width=True):
-                storage.set_talk_script("")
-                st.success("消去しました。")
-                st.rerun()
+            return
+
+        total = sum(len(i.get("body", "")) for i in items)
+        st.caption(
+            f"登録済み：**{len(items)} 単元 / 合計 {total:,} 文字**（元スプレッドシートのタブ単位）。"
+            "ロープレ評価の🎯模範トーク視点は、この型の再現度で採点されます。"
+        )
+        # 単元ごとに中身をチェック・修正できる
+        books = sorted({i.get("book", "") for i in items})
+        bcol, tcol = st.columns([1, 2])
+        with bcol:
+            book = st.selectbox("ブック", books, key="rp_sc_book")
+        with tcol:
+            tabs = [i["tab"] for i in items if i.get("book") == book]
+            tab = st.selectbox("単元（タブ）", tabs, key="rp_sc_tab")
+        target = next((i for i in items if i.get("book") == book and i.get("tab") == tab), None)
+        if target:
+            body = st.text_area(f"「{tab}」の内容（{len(target.get('body','')):,}字）",
+                                value=target.get("body", ""), height=320, key=f"rp_sc_body_{tab}")
+            if st.button("💾 この単元を更新", key=f"rp_sc_save_{tab}", use_container_width=True):
+                if storage.update_talk_script_item(tab, body):
+                    st.success(f"「{tab}」を更新しました。")
+                    st.rerun()
+                else:
+                    st.error("更新できませんでした。")
+
+        st.divider()
+        if st.button("🗑️ スクリプトをすべて消去", key="rp_script_clear"):
+            storage.set_talk_script("")
+            st.success("消去しました。")
+            st.rerun()
 
 
 _CATEGORY_LABELS = {
