@@ -595,12 +595,16 @@ def _speak(text: str, key: str) -> None:
           const btn = document.getElementById("sp{key}");
           const tag = document.getElementById("st{key}");
 
-          // 日本語音声の中から、より自然なものを優先して選ぶ
+          // 30〜40代の女性を想定：日本語の女性音声を優先し、男性音声は除外する
+          const MALE = ["Otoya", "Ichiro", "Hattori", "Daichi", "Naoki", "Male"];
           function pickVoice() {{
-            const vs = window.speechSynthesis.getVoices()
+            let vs = window.speechSynthesis.getVoices()
               .filter(v => v.lang && v.lang.toLowerCase().indexOf("ja") === 0);
             if (!vs.length) return null;
-            const pref = ["Google 日本語", "Google", "Otoya", "O-Ren", "Kyoko", "Ayumi", "Nanami", "Haruka"];
+            const female = vs.filter(v => !MALE.some(m => (v.name || "").indexOf(m) >= 0));
+            if (female.length) vs = female;
+            // 落ち着いた大人の女性に近い順
+            const pref = ["Google 日本語", "Kyoko", "O-Ren", "Nanami", "Ayumi", "Haruka", "Sayaka"];
             for (const p of pref) {{
               const hit = vs.find(v => v.name && v.name.indexOf(p) >= 0);
               if (hit) return hit;
@@ -618,8 +622,9 @@ def _speak(text: str, key: str) -> None:
               chunks.forEach((c, i) => {{
                 const u = new SpeechSynthesisUtterance(c.trim());
                 u.lang = "ja-JP";
-                u.rate = 0.95;   // 少しゆっくりで聞き取りやすく
-                u.pitch = 1.0;   // 不自然な高さにしない
+                // 30〜40代女性の落ち着いた話し方に寄せる：やや低め・やや速め
+                u.rate = 1.08;   // 少し速く（もたつきを解消）
+                u.pitch = 0.88;  // 少し低く（高すぎる声を落ち着かせる）
                 u.volume = 1.0;
                 if (voice) u.voice = voice;
                 if (i === chunks.length - 1) u.onend = () => tag.textContent = "";
