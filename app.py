@@ -546,6 +546,75 @@ def render_history_tab(user: dict) -> None:
                 components.evaluation_result(EvaluationResult.from_dict(rec["result"]))
 
 
+def _customer_bubble(text: str, ctype: str) -> None:
+    """お客様のセリフを、アバター＋吹き出しで『会話している雰囲気』に表示する。"""
+    face, name = ("🙎", "まだ何も決めていないお客様") if ctype == "未検討" else \
+                 ("🧑", "すでに検討中のお客様")
+    st.markdown(
+        f"""
+        <div style="display:flex;gap:.9rem;align-items:flex-start;margin:.6rem 0 .2rem">
+          <div style="flex:none;width:64px;height:64px;border-radius:50%;
+                      background:linear-gradient(135deg,#FFE7E2,#EDE9FF);
+                      display:flex;align-items:center;justify-content:center;font-size:2rem;
+                      box-shadow:0 2px 10px rgba(0,0,0,.08);animation:tkbob 2.6s ease-in-out infinite">
+            {face}
+          </div>
+          <div style="flex:1">
+            <div style="font-size:.78rem;color:#8C8794;margin-bottom:.2rem">{name}</div>
+            <div style="position:relative;background:#fff;border:1px solid #EFE9F5;
+                        border-radius:14px;padding:.8rem 1rem;white-space:pre-wrap;
+                        line-height:1.75;font-size:1.02rem;
+                        box-shadow:0 2px 12px rgba(0,0,0,.06)">{_esc(text)}</div>
+          </div>
+        </div>
+        <style>@keyframes tkbob{{0%,100%{{transform:translateY(0)}}50%{{transform:translateY(-4px)}}}}</style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _speak(text: str, key: str) -> None:
+    """お客様のセリフをブラウザ内蔵の音声合成で読み上げる（API費用ゼロ）。"""
+    import json as _json
+
+    import streamlit.components.v1 as st_components
+
+    payload = _json.dumps(text)
+    st_components.html(
+        f"""
+        <div style="display:flex;gap:.5rem;align-items:center">
+          <button id="sp{key}" style="cursor:pointer;border:1px solid #6C5CE7;color:#6C5CE7;
+            background:#fff;border-radius:999px;padding:.35rem .9rem;font-size:.85rem">
+            🔊 お客様の声で聞く
+          </button>
+          <span id="st{key}" style="font-size:.78rem;color:#8C8794"></span>
+        </div>
+        <script>
+        (function() {{
+          const text = {payload};
+          const btn = document.getElementById("sp{key}");
+          const tag = document.getElementById("st{key}");
+          function speak() {{
+            try {{
+              window.speechSynthesis.cancel();
+              const u = new SpeechSynthesisUtterance(text);
+              u.lang = "ja-JP"; u.rate = 1.0; u.pitch = 1.05;
+              const jp = window.speechSynthesis.getVoices().filter(v => v.lang && v.lang.indexOf("ja") === 0);
+              if (jp.length) u.voice = jp[0];
+              u.onstart = () => tag.textContent = "🗣 話しています…";
+              u.onend = () => tag.textContent = "";
+              window.speechSynthesis.speak(u);
+            }} catch (e) {{ tag.textContent = "この端末では音声が使えません"; }}
+          }}
+          btn.onclick = speak;
+          setTimeout(speak, 400);   // 自動再生を試す（ブロックされたらボタンで）
+        }})();
+        </script>
+        """,
+        height=48,
+    )
+
+
 def _esc(text: str) -> str:
     """HTML として安全に表示するためのエスケープ（改行はCSSで保持する）。"""
     return (str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
@@ -643,7 +712,8 @@ def render_roleplay_tab(user: dict) -> None:
     if turn < len(turns):
         st.divider()
         st.caption(f"ターン {turn + 1} / {len(turns)}")
-        st.markdown(f"#### 🧑 お客様\n> {turns[turn]['customer']}")
+        _customer_bubble(turns[turn]["customer"], scenario.get("customer_type", "検討済み"))
+        _speak(turns[turn]["customer"], f"{sid}_{turn}")
 
         ready_key = f"rp_ready_{turn}"
         if not st.session_state.get(ready_key):
