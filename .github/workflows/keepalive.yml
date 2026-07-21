@@ -19,10 +19,10 @@ jobs:
           for i in 1 2 3; do
             code=$(curl -s -o /dev/null -w "%{http_code}" -L --max-time 90 "$URL" || echo "000")
             echo "attempt $i -> HTTP $code"
-            if [ "$code" = "200" ]; then
-              echo "awake"
-              exit 0
-            fi
+            # 2xx/3xx なら「サーバーが応答している＝起きている」とみなす
+            case "$code" in
+              2*|3*) echo "awake"; exit 0 ;;
+            esac
             sleep 30
           done
           # 起こせなくてもワークフローは失敗にしない（通知を鳴らさない）
