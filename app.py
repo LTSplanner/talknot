@@ -546,9 +546,14 @@ def render_history_tab(user: dict) -> None:
                 components.evaluation_result(EvaluationResult.from_dict(rec["result"]))
 
 
+def _esc(text: str) -> str:
+    """HTML として安全に表示するためのエスケープ（改行はCSSで保持する）。"""
+    return (str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
+
+
 def _roleplay_worker(
     job_id: str, user_email: str, label: str,
-    audio_turns: list, scenario_lines: list,
+    audio_turns: list, scenario_lines: list, focus: str | None = None,
 ) -> None:
     """1人ロープレの録音をまとめて1回だけ Gemini で評価する（背景実行）。"""
     try:
@@ -557,6 +562,7 @@ def _roleplay_worker(
                 audio_turns, scenario_lines,
                 storage.get_talk_script() or None,
                 storage.get_knowledge_base(),
+                focus=focus,
             )
         storage.finish_evaluation(user_email, job_id, result, label)
         storage.append_knowledge(result.knowledge)
@@ -576,7 +582,8 @@ def _start_roleplay_job(user: dict, scenario: dict, audio_turns: list) -> None:
     threading.Thread(
         target=_roleplay_worker,
         kwargs=dict(job_id=job_id, user_email=user["email"], label=label,
-                    audio_turns=audio_turns, scenario_lines=lines),
+                    audio_turns=audio_turns, scenario_lines=lines,
+                    focus=scenario.get("focus")),
         daemon=True,
     ).start()
 
@@ -594,12 +601,21 @@ def render_roleplay_tab(user: dict) -> None:
     )
 
     scenarios = storage.get_scenarios()
-    # 商材・単元ごとにグループ分けしてプルダウンを見やすくする
-    groups: dict[str, list[dict]] = {}
-    for s in scenarios:
-        groups.setdefault(s.get("group", "総合"), []).append(s)
     locked = bool(st.session_state.get("rp_audio"))
-    gcol, scol = st.columns([1, 2])
+
+    # お客様の属性で段階的に練習する（検討済み → 未検討 の順に難しくなる）
+    types = ["すべて"] + sorted({s.get("customer_type", "検討済み") for s in scenarios})
+    ccol, gcol, scol = st.columns([1, 1, 2])
+    with ccol:
+        ctype = st.selectbox("お客様タイプ", types, key="rp_ctype", disabled=locked)
+    pool = [s for s in scenarios
+            if ctype == "すべて" or s.get("customer_type", "検討済み") == ctype]
+    groups: dict[str, list[dict]] = {}
+    for s in pool:
+        groups.setdefault(s.get("group", "総合"), []).append(s)
+    if not groups:
+        st.info("この条件に合う単元がありません。")
+        return
     with gcol:
         group = st.selectbox("カテゴリ", list(groups), key="rp_group", disabled=locked)
     with scol:
@@ -609,6 +625,12 @@ def render_roleplay_tab(user: dict) -> None:
                            format_func=lambda i: titles[i], key="rp_scenario", disabled=locked)
     scenario = storage.get_scenario(sid) or items[0]
     turns = storage.scenario_turns(scenario)
+    lv = scenario.get("level", 1)
+    st.caption(
+        f"👤 お客様タイプ：**{scenario.get('customer_type','検討済み')}**　"
+        f"／ 難易度：{'★' * int(lv)}{'☆' * (2 - int(lv))}　"
+        f"／ 全 {len(turns)} ターン"
+    )
     if not storage.get_talk_script():
         st.caption("⚠️ 模範トークスクリプトが未登録です（下の管理者欄で登録すると、その型を基準に採点します）。")
 
@@ -648,7 +670,13 @@ def render_roleplay_tab(user: dict) -> None:
             show = practice or st.checkbox("📋 カンペを見る（見ずに言えたら次のステップ）",
                                            key=f"rp_hint_{turn}")
             if show:
-                st.info(hint)
+                # Markdown は単一改行を無視するため、行末に空白2つを足して改行を保つ
+                st.markdown(
+                    '<div style="background:#EEF3FF;border-left:4px solid #6C5CE7;'
+                    'padding:.7rem 1rem;border-radius:8px;white-space:pre-wrap;'
+                    'line-height:1.7;font-size:.93rem">' + _esc(hint) + "</div>",
+                    unsafe_allow_html=True,
+                )
             else:
                 st.caption("💡 まずは自分の言葉で。詰まったら上のチェックでカンペを開けます。")
     else:

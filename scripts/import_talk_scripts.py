@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import io
+import re
 import sys
 import urllib.request
 
@@ -45,8 +46,21 @@ def _token() -> str:
     return creds.token
 
 
+def _is_heading(cell) -> bool:
+    """セルに色が塗ってあれば『項目の見出し』とみなす（黄色・赤/ピンク等）。"""
+    fill = getattr(cell, "fill", None)
+    if fill is None or getattr(fill, "patternType", None) != "solid":
+        return False
+    rgb = getattr(getattr(fill, "fgColor", None), "rgb", None)
+    return bool(rgb) and rgb not in ("00000000", "FFFFFFFF")
+
+
 def _book_text(sheet_id: str, token: str) -> tuple[list[tuple[str, str]], int]:
-    """ブックを xlsx で取得し、[(タブ名, 本文)] と合計文字数を返す。"""
+    """ブックを xlsx で取得し、[(タブ名, 本文)] と合計文字数を返す。
+
+    - セル1つ＝1段落として改行し、読みやすく整形する。
+    - 色付きセル（黄色・赤等）は項目の見出しなので【】で強調し、前に空行を入れる。
+    """
     import openpyxl
 
     req = urllib.request.Request(
@@ -58,12 +72,30 @@ def _book_text(sheet_id: str, token: str) -> tuple[list[tuple[str, str]], int]:
     out: list[tuple[str, str]] = []
     total = 0
     for name in wb.sheetnames:
-        cells = []
-        for row in wb[name].iter_rows(values_only=True):
-            for c in row:
-                if c and str(c).strip():
-                    cells.append(str(c).strip())
-        body = "\n".join(cells).strip()
+        ws = wb[name]
+        # 先に見出し（色付きセル）の文言を集める。別列にある同じ文字列は
+        # 目次（インデックス列）なので本文からは除く。
+        headings = {
+            str(c.value).strip()
+            for row in ws.iter_rows() for c in row
+            if c.value and str(c.value).strip() and _is_heading(c)
+        }
+        lines: list[str] = []
+        for row in ws.iter_rows():
+            for cell in row:
+                val = cell.value
+                if val is None or not str(val).strip():
+                    continue
+                text = str(val).strip()
+                if _is_heading(cell):
+                    lines.append("")           # 見出しの前に空行
+                    lines.append(f"【{text}】")
+                elif text in headings:
+                    continue                   # 目次列の重複は捨てる
+                else:
+                    lines.append(text)
+        body = "\n".join(lines).strip()
+        body = re.sub(r"\n{3,}", "\n\n", body)   # 空行の詰めすぎを整える
         if body:
             out.append((name, body))
             total += len(body)

@@ -61,16 +61,65 @@ def _opening_line(tab: str) -> str:
     return f"{t}について、まだよく分かっていなくて。教えてもらえますか？"
 
 
-def _chunks(body: str, max_turns: int) -> list[str]:
-    """スクリプト本文を、ターン数ぶんの塊に分ける（段落単位でまとめる）。"""
-    paras = [p.strip() for p in re.split(r"\n\s*\n|\n(?=[■●◆])", body) if p.strip()]
-    if not paras:
-        return []
-    if len(paras) <= max_turns:
-        return paras
-    # 段落数が多いときは、ほぼ均等になるよう束ねる
-    size = (len(paras) + max_turns - 1) // max_turns
-    return ["\n".join(paras[i:i + size]) for i in range(0, len(paras), size)][:max_turns]
+# 「商談の導入」系は、信頼関係づくりを最重視して採点させる
+TRUST_FOCUS = (
+    "この単元の目的は『お客様と信頼関係を築き、なんでも相談してもらえる雰囲気をつくる』こと。"
+    "次を最重視して採点する：\n"
+    "- 警戒をほどく共感・受け止め（否定しない・今すぐ決めさせない）\n"
+    "- 今日のゴール共有で安心させたか（『今日は決める場ではない』と伝えられたか）\n"
+    "- 相談しやすい問いかけ（オープンな質問で、お客様が話す余白をつくれたか）\n"
+    "- 売り込み感の排除（提案より先に“理解しようとする姿勢”が出ていたか）\n"
+    "- 結果として、お客様が本音や不安を漏らし始める雰囲気になったか\n"
+    "※ここが弱ければ、商品説明がどれだけ流暢でも高評価にしないこと。"
+)
+TRUST_KEYS = ["導入", "会社説明", "スケジュール"]
+
+# お客様の属性別フォーカス（段階的にスキルアップさせる）
+UNDECIDED_FOCUS = "\n".join([
+    "【お客様属性：未検討】まだ必要性を感じていないお客様。ここが最難関で、最重要。",
+    "- いきなり商品説明に入っていないか（説明先行は減点）",
+    "- 暮らし方・家族・不満・将来の困りごとを聞き出し、本人に『言わせた』か",
+    "- 引き出したニーズと商材を結び付けられたか（機能の羅列で終わっていないか）",
+    "- 結果として『それなら必要かも』と本人が納得する流れを作れたか",
+])
+DECIDED_FOCUS = "\n".join([
+    "【お客様属性：検討済み】すでに検討・見積取得済みのお客様。",
+    "- 既存の検討内容を否定せず受け止めたうえで、まだ気づいていない観点を足せたか",
+    "- 価格比較だけの土俵から、中身（耐久・保証・範囲）の比較へ移せたか",
+    "- 見積から外されないよう、必要性を本人の言葉で再確認できたか",
+])
+
+
+def _customer_type(tab: str) -> tuple[str, int]:
+    """タブ名から お客様属性 と 難易度レベル を決める。『未〜』は未検討版。"""
+    if tab.strip().startswith("未"):
+        return "未検討", 2
+    return "検討済み", 1
+
+
+def _sections(body: str, max_turns: int) -> list[tuple[str, str]]:
+    """本文を【見出し】単位の章に分ける。戻り値 [(見出し, 本文)]。
+
+    スプレッドシートの色付きセル＝項目見出しを【】で取り込んでいるので、
+    その章立てをそのままロープレのターンに使う（読みやすく・練習しやすい）。
+    """
+    parts = re.split(r"\n?【([^】]+)】\n?", body)
+    secs: list[tuple[str, str]] = []
+    if len(parts) > 1:
+        head = parts[0].strip()
+        if head:
+            secs.append(("導入部", head))
+        for i in range(1, len(parts) - 1, 2):
+            title, chunk = parts[i].strip(), parts[i + 1].strip()
+            if chunk:
+                secs.append((title, chunk))
+    else:
+        paras = [p.strip() for p in re.split(r"\n\s*\n", body) if p.strip()]
+        if not paras:
+            return []
+        size = max(1, (len(paras) + max_turns - 1) // max_turns)
+        secs = [("", "\n".join(paras[i:i + size])) for i in range(0, len(paras), size)]
+    return secs[:max_turns]
 
 
 def _token() -> str:
@@ -113,18 +162,24 @@ def main() -> None:
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 
-    token = _token()
+    # 取り込み済みの模範トークスクリプト（単元別・見出し付き）を情報源にする
+    source = [(i.get("tab", ""), i.get("body", "")) for i in storage.get_talk_script_items()]
+    if not source:
+        sys.exit("模範トークスクリプトが未登録です。先に import_talk_scripts.py を実行してください。")
     # 手書きの総合シナリオを先頭に（グループ名を付ける）
     scenarios: list[dict] = []
     for s in storage._DEFAULT_SCENARIOS:
         s = dict(s)
         s["group"] = "総合商談"
+        s.setdefault("customer_type", "検討済み")
+        s.setdefault("level", 1)
+        s.setdefault("focus", TRUST_FOCUS if s.get("id") == "first_meeting" else DECIDED_FOCUS)
         scenarios.append(s)
 
     seen = {s["id"] for s in scenarios}
-    for sheet_id in SCRIPT_BOOKS:
-        for tab, body in _tabs(sheet_id, token):
-            parts = _chunks(body, args.max_turns)
+    if True:
+        for tab, body in source:
+            parts = _sections(body, args.max_turns)
             if not parts:
                 continue
             sid = re.sub(r"[^0-9A-Za-zぁ-んァ-ン一-龥]+", "_", tab).strip("_")[:40] or f"t{len(seen)}"
@@ -135,12 +190,22 @@ def main() -> None:
                 n += 1
             seen.add(sid)
             turns = []
-            for i, chunk in enumerate(parts):
-                customer = _opening_line(tab) if i == 0 else FOLLOW_UPS[(i - 1) % len(FOLLOW_UPS)]
-                turns.append({"customer": customer, "hint": chunk})
-            scenarios.append({
-                "id": sid, "group": _group_of(tab), "title": tab, "turns": turns,
-            })
+            for i, (title, chunk) in enumerate(parts):
+                if i == 0:
+                    customer = _opening_line(tab)
+                elif title and title != "導入部":
+                    customer = f"（{title}について）もう少し教えてもらえますか？"
+                else:
+                    customer = FOLLOW_UPS[(i - 1) % len(FOLLOW_UPS)]
+                turns.append({"customer": customer, "hint": chunk, "section": title})
+            ctype, level = _customer_type(tab)
+            entry = {"id": sid, "group": _group_of(tab), "title": tab, "turns": turns,
+                     "customer_type": ctype, "level": level}
+            focus_parts = [UNDECIDED_FOCUS if ctype == "未検討" else DECIDED_FOCUS]
+            if any(k in tab for k in TRUST_KEYS):
+                focus_parts.append(TRUST_FOCUS)
+            entry["focus"] = "\n\n".join(focus_parts)
+            scenarios.append(entry)
 
     by_group: dict[str, int] = {}
     for s in scenarios:

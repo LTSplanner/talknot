@@ -12,6 +12,7 @@ def build_roleplay_prompt(
     scenario_lines: list[str],
     talk_script: str | None = None,
     knowledge_base: str | None = None,
+    focus: str | None = None,
 ) -> str:
     """1人ロープレ（台本のお客様 × 音声で応答）の評価プロンプト。
 
@@ -20,6 +21,7 @@ def build_roleplay_prompt(
     """
     base = build_evaluation_prompt(reference_talk=talk_script, knowledge_base=knowledge_base)
     lines = "\n".join(f"{i+1}. お客様「{t}」" for i, t in enumerate(scenario_lines))
+    focus_block = _focus_block(focus)
     script_note = (
         "上の『模範トーク（社内基準）』が今回の**模範トークスクリプト**です。"
         "reference（🎯模範トーク視点）は、このスクリプトの型・流れ・言い回しを"
@@ -37,7 +39,12 @@ def build_roleplay_prompt(
 - {script_note}
 - お客様の声が無いため、感情の読み取りは「営業役の間・トーン・言い回し」と、
   台本のお客様セリフから推測できる心理をもとに評価してください。
-- feedback の timestamp は、何ターン目かを "T1" "T2" のように記してください。"""
+- feedback の timestamp は、何ターン目かを "T1" "T2" のように記してください。
+{focus_block}"""
+
+
+def _focus_block(focus: str | None) -> str:
+    return f"\n# 【この単元で特に見るポイント（最優先）】\n{focus}\n" if focus else ""
 
 
 def build_evaluation_prompt(
@@ -71,6 +78,8 @@ signal・inferred_need・note、feedback、summary を含め、英語を混ぜ�
 言い淀み・沈黙・話題の回避・過剰な同意・即答できない様子・声の小ささなどの
 非言語サインを手がかりに、お客様が言葉にしていない本音・不安・疑問（秘密領域）まで
 読み取ってください。
+
+{settings.SALES_POLICY}
 {reference_block}{knowledge_block}
 # 最重要：まずお客様の『隠れたニーズ（秘密領域）』を読む
 - お客様の立場に立ち、商談中に「口には出していないが感じていたであろう」不安・疑問・
