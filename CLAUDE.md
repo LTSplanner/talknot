@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## TalKnot（トークノット）とは
+## KNOTE（ノート）とは
 
 社内向けの営業商談・ロープレ評価 Web アプリ。Talk（話す）＋ Knot（結び目・絆）。
 動画/音声から声のトーン・間・発話比率を分析し、お客様の感情の動きを

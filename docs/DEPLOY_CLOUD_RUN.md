@@ -1,6 +1,6 @@
-# TalKnot を Cloud Run に公開する手順（スマホ対応）
+# KNOTE を Cloud Run に公開する手順（スマホ対応）
 
-社内メンバーがスマホからも使えるように、TalKnot を **Google Cloud Run** に常時稼働の
+社内メンバーがスマホからも使えるように、KNOTE を **Google Cloud Run** に常時稼働の
 HTTPS URL で公開する手順です。GCPプロジェクトは既存の **`eigyou-ro-pure`** を使います。
 
 > 用語：このページのコマンドは Mac のターミナルに貼り付けて実行します。
@@ -55,7 +55,7 @@ gcloud storage buckets create gs://talknot-data-eigyou-ro-pure \
 ### A-5. シークレットを Secret Manager に登録
 `.env` の値と、サービスアカウント鍵ファイルを登録します。
 ```bash
-cd "/Users/kumadaharuki/クロードコード/TalKnot（トークノット）"
+cd "/Users/kumadaharuki/クロードコード/KNOTE（ノート）"
 
 # .env から値を取り出して登録（GEMINI / OAuth）
 grep '^GEMINI_API_KEY='     .env | cut -d= -f2- | tr -d '\n' | \
@@ -96,7 +96,7 @@ gcloud storage buckets add-iam-policy-binding gs://talknot-data-eigyou-ro-pure \
 ## B. デプロイ（初回 & 以降毎回）
 
 ```bash
-cd "/Users/kumadaharuki/クロードコード/TalKnot（トークノット）"
+cd "/Users/kumadaharuki/クロードコード/KNOTE（ノート）"
 bash scripts/deploy_cloud_run.sh
 ```
 - ソースからクラウドでビルドされ、数分でデプロイされます（Docker不要）。

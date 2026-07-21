@@ -13,7 +13,7 @@ jobs:
   ping:
     runs-on: ubuntu-latest
     steps:
-      - name: Ping TalKnot
+      - name: Ping KNOTE
         run: |
           URL="https://talknot-lts.streamlit.app"
           for i in 1 2 3; do

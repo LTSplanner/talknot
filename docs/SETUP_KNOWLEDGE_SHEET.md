@@ -11,7 +11,7 @@
 ## 全体像
 
 ```
-[TalKnot アプリ] ──読み書き──> [共有ドライブのスプレッドシート] <──人も閲覧・編集
+[KNOTE アプリ] ──読み書き──> [共有ドライブのスプレッドシート] <──人も閲覧・編集
                 （最小権限の専用アカウントで接続。録画には一切触れない）
 ```
 
@@ -21,7 +21,7 @@
 
 ### ① 保存用スプレッドシートを作る
 1. **共有ドライブ**（個人マイドライブではなく、チームの共有ドライブ推奨）に
-   新しい Google スプレッドシートを作成。名前は例：`TalKnot 弊社ナレッジ`
+   新しい Google スプレッドシートを作成。名前は例：`KNOTE 弊社ナレッジ`
 2. 1枚目のシート名（タブ名）を **`Knowledge`** にする
 3. 1行目に見出しを入れる：`A1=category` / `B1=point` / `C1=added_at`
 4. URL の中の **スプレッドシートID** を控える
@@ -74,7 +74,7 @@ KNOWLEDGE_SA_JSON = '''
 
 ```
 KNOWLEDGE_SHEET_ID=スプレッドシートID
-KNOWLEDGE_SA_FILE=secrets/talknot-knowledge-sa.json
+KNOWLEDGE_SA_FILE=secrets/knote-knowledge-sa.json
 ```
 
 ---

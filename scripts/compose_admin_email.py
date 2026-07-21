@@ -13,7 +13,7 @@ from pathlib import Path
 
 TO = "ryouchiku@life-time-support.com"
 CC = "planner@life-time-support.com"
-SUBJECT = "【ご依頼】TalKnot 用 Drive 代理アクセス設定のお願い"
+SUBJECT = "【ご依頼】KNOTE 用 Drive 代理アクセス設定のお願い"
 BODY_FILE = Path(__file__).resolve().parent.parent / "docs" / "管理者への依頼.md"
 
 

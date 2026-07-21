@@ -1,4 +1,4 @@
-"""TalKnot セットアップ確認スクリプト。
+"""KNOTE セットアップ確認スクリプト。
 
 `.env` の設定状況を点検し、Gemini API キーが有効かを軽いリクエストで確認する。
 
@@ -19,7 +19,7 @@ def _mark(ok: bool) -> str:
 
 
 def main() -> int:
-    print("=== TalKnot セットアップ確認 ===\n")
+    print("=== KNOTE セットアップ確認 ===\n")
 
     print("[アクセス制御]")
     print(f"  許可ドメイン : {settings.ALLOWED_DOMAINS}")
@@ -46,7 +46,7 @@ def main() -> int:
         client = genai.Client(api_key=settings.GEMINI_API_KEY)
         resp = client.models.generate_content(
             model=settings.GEMINI_MODEL,
-            contents="「TalKnotの準備完了」とだけ返答してください。",
+            contents="「KNOTEの準備完了」とだけ返答してください。",
         )
         print(f"  {_mark(True)} 接続成功。応答: {resp.text.strip()[:60]}")
     except Exception as e:

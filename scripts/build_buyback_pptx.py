@@ -1,7 +1,7 @@
-"""docs/BUYBACK_SLIDES.md から TalKnot ブランドカラーの .pptx を生成する。
+"""docs/BUYBACK_SLIDES.md から KNOTE ブランドカラーの .pptx を生成する。
 
 使い方:  python3 scripts/build_buyback_pptx.py
-出力:    docs/BUYBACK_TalKnot.pptx
+出力:    docs/BUYBACK_KNOTE.pptx
 """
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from pptx.dml.color import RGBColor
 from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
 from pptx.util import Inches, Pt
 
-# --- TalKnot ブランドカラー（ui/theme.py と対応）---
+# --- KNOTE ブランドカラー（ui/theme.py と対応）---
 CORAL = RGBColor(0xFF, 0x6F, 0x61)
 INDIGO = RGBColor(0x6C, 0x5C, 0xE7)
 SUNNY = RGBColor(0xFF, 0xC3, 0x6B)
@@ -22,7 +22,7 @@ MUTED = RGBColor(0x8C, 0x87, 0x94)
 WHITE = RGBColor(0xFF, 0xFF, 0xFF)
 
 SRC = "docs/BUYBACK_SLIDES.md"
-OUT = "docs/BUYBACK_TalKnot.pptx"
+OUT = "docs/BUYBACK_KNOTE.pptx"
 
 
 def parse_slides(path: str) -> list[tuple[str, list[str]]]:
@@ -81,7 +81,7 @@ def build() -> None:
             _, tf = _textbox(slide, Inches(1), Inches(2.0), Inches(11.3), Inches(1.2))
             p = tf.paragraphs[0]
             p.alignment = PP_ALIGN.CENTER
-            r = p.add_run(); r.text = "TalKnot（トークノット）🪢"
+            r = p.add_run(); r.text = "KNOTE（ノート）"
             r.font.size = Pt(48); r.font.bold = True; r.font.color.rgb = WHITE
             _, tf2 = _textbox(slide, Inches(1), Inches(3.4), Inches(11.3), Inches(2.2))
             for j, b in enumerate(bullets):
@@ -119,7 +119,7 @@ def build() -> None:
 
         # フッター（左：ブランド / 右：ページ番号）
         _, ftf = _textbox(slide, Inches(0.8), Inches(6.95), Inches(6), Inches(0.4))
-        fr = ftf.paragraphs[0].add_run(); fr.text = "TalKnot 🪢  ｜ システム買取制度 申請資料"
+        fr = ftf.paragraphs[0].add_run(); fr.text = "KNOTE  ｜ システム買取制度 申請資料"
         fr.font.size = Pt(11); fr.font.color.rgb = MUTED
         _, ptf = _textbox(slide, Inches(11.8), Inches(6.95), Inches(1.2), Inches(0.4))
         pp = ptf.paragraphs[0]; pp.alignment = PP_ALIGN.RIGHT

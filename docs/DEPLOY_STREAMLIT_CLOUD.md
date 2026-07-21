@@ -1,4 +1,4 @@
-# TalKnot を Streamlit Community Cloud に公開する手順（無料・スマホ対応）
+# KNOTE を Streamlit Community Cloud に公開する手順（無料・スマホ対応）
 
 無料・カード不要で、社内メンバーがスマホからも使えるよう公開する手順です。
 コードは GitHub の **`LTSplanner/talknot`（非公開）** に置いてあります。
@@ -66,7 +66,7 @@ Streamlit のURLは `https://<好きな名前>.streamlit.app`。
 ## 更新のしかた
 コードを直したら GitHub に push するだけで、Streamlit Cloud が自動で再デプロイします。
 ```bash
-cd "/Users/kumadaharuki/クロードコード/TalKnot（トークノット）"
+cd "/Users/kumadaharuki/クロードコード/KNOTE（ノート）"
 export PATH="$HOME/gh-cli/gh_2.95.0_macOS_arm64/bin:$PATH"
 git add -A && git commit -m "変更内容" && git push
 ```
