@@ -947,6 +947,49 @@ def _apply_processing_timeout(rec: dict) -> dict:
     return rec
 
 
+def list_all_evaluations() -> list[dict]:
+    """全メンバーの評価履歴を新しい順で返す（管理者の閲覧・実施状況の確認用）。"""
+    if _use_eval_sheets():
+        from services import sheets_knowledge
+
+        rows = sorted(sheets_knowledge.load_evaluations(),
+                      key=lambda r: r.get("job_id", ""), reverse=True)
+        records = []
+        for r in rows:
+            rec = {
+                "user_email": r.get("user_email", ""), "label": r.get("label", ""),
+                "saved_at": r.get("saved_at", ""), "status": r.get("status", "done"),
+                "error": r.get("error", ""), "result": None,
+            }
+            if r.get("result_json"):
+                try:
+                    rec["result"] = json.loads(r["result_json"])
+                except json.JSONDecodeError:
+                    rec["result"] = None
+            records.append(_apply_processing_timeout(rec))
+        return records
+
+    if _use_gcs():
+        records = []
+        for blob in sorted(_bucket().list_blobs(prefix=_gcs_path("evaluations")),
+                           key=lambda b: b.name, reverse=True):
+            try:
+                records.append(json.loads(blob.download_as_text()))
+            except (json.JSONDecodeError, OSError):
+                continue
+        return [_apply_processing_timeout(r) for r in records]
+
+    if not settings.EVALUATIONS_DIR.exists():
+        return []
+    records = []
+    for path in sorted(settings.EVALUATIONS_DIR.glob("*.json"), reverse=True):
+        try:
+            records.append(json.loads(path.read_text(encoding="utf-8")))
+        except (json.JSONDecodeError, OSError):
+            continue
+    return [_apply_processing_timeout(r) for r in records]
+
+
 def list_evaluations(user_email: str) -> list[dict]:
     """指定ユーザーの評価履歴を新しい順で返す（各自のみ。他人の評価は返さない）。"""
     if _use_eval_sheets():

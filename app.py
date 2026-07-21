@@ -522,9 +522,52 @@ _STATUS_BADGE = {
 }
 
 
+def _render_practice_overview(all_records: list[dict]) -> None:
+    """管理者向け：誰が・どれだけ・いつロープレしたかの実施状況サマリ。"""
+    stats: dict[str, dict] = {}
+    for r in all_records:
+        who = r.get("user_email", "") or "(不明)"
+        s = stats.setdefault(who, {"roleplay": 0, "meeting": 0, "last": ""})
+        if str(r.get("label", "")).startswith("🎙️"):
+            s["roleplay"] += 1
+        else:
+            s["meeting"] += 1
+        when = r.get("saved_at", "")
+        if when > s["last"]:
+            s["last"] = when
+    if not stats:
+        return
+    st.markdown("**📊 メンバー別の実施状況**")
+    rows = [
+        {
+            "メンバー": who.split("@")[0],
+            "🎙️ロープレ": v["roleplay"],
+            "🎥商談評価": v["meeting"],
+            "最終実施": v["last"] or "-",
+        }
+        for who, v in sorted(stats.items(), key=lambda kv: -kv[1]["roleplay"])
+    ]
+    st.dataframe(rows, use_container_width=True, hide_index=True)
+
+
 def render_history_tab(user: dict) -> None:
     st.markdown("##### 評価履歴")
+
+    is_admin = settings.is_admin(user.get("email"))
     records = storage.list_evaluations(user["email"])
+
+    if is_admin:
+        show_all = st.toggle("🛡️ 全メンバーの履歴を見る（管理者）", value=False, key="hist_all")
+        if show_all:
+            all_records = storage.list_all_evaluations()
+            _render_practice_overview(all_records)
+            members = ["全員"] + sorted({r.get("user_email", "") for r in all_records if r.get("user_email")})
+            who = st.selectbox("メンバーで絞り込み", members, key="hist_member")
+            records = all_records if who == "全員" else [
+                r for r in all_records if r.get("user_email") == who
+            ]
+            st.caption(f"表示中：{len(records)} 件（管理者として全メンバーを閲覧しています）")
+
     if not records:
         st.caption("まだ評価履歴がありません。")
         return
@@ -537,7 +580,14 @@ def render_history_tab(user: dict) -> None:
     for rec in records:
         status = rec.get("status", "done")
         badge = _STATUS_BADGE.get(status, "✅ 完了")
-        with st.expander(f"{badge}　{rec.get('saved_at', '')}　{rec.get('label', '')}"):
+        owner = rec.get("user_email", "")
+        who_tag = (
+            f"　👤{owner.split('@')[0]}"
+            if is_admin and owner and owner != user.get("email") else ""
+        )
+        with st.expander(
+            f"{badge}　{rec.get('saved_at', '')}{who_tag}　{rec.get('label', '')}"
+        ):
             if status == "processing":
                 st.caption("AI が解析中です。少し待って「🔄 最新の状態に更新」を押してください。")
             elif status == "error":
