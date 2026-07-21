@@ -48,6 +48,26 @@ st.set_page_config(
 theme.inject_css()
 
 
+def _declare_japanese_page() -> None:
+    """ページ言語を日本語と宣言し、Chromeの自動翻訳による誤訳を防ぐ。
+
+    Streamlit は <html lang="en"> を出力するため、Chrome が英語ページと誤認して
+    日本語へ「翻訳」し、ブランド名(KNOTE→注記)や本文(可視化→解決)まで書き換えてしまう。
+    """
+    import streamlit.components.v1 as _c
+
+    _c.html(
+        "<script>try{const d=window.parent.document;"
+        "d.documentElement.lang='ja';"
+        "d.documentElement.setAttribute('translate','no');"
+        "}catch(e){}</script>",
+        height=0,
+    )
+
+
+_declare_japanese_page()
+
+
 # --------------------------------------------------------------------------- #
 # 認証
 # --------------------------------------------------------------------------- #

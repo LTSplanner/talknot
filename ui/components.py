@@ -32,8 +32,8 @@ def hero(subtitle: str | None = None, compact: bool = False) -> None:
         <div class="{klass}">
             <div class="tk-brand">
                 {KNOT_MARK.format(size=size)}
-                <h1 class="tk-logo">KNOTE</h1>
-                <span class="tk-reading">ノート</span>
+                <h1 class="tk-logo notranslate" translate="no">KNOTE</h1>
+                <span class="tk-reading notranslate" translate="no">ノート</span>
             </div>
             {tagline}
         </div>
@@ -206,7 +206,7 @@ def sidebar(user: dict) -> None:
     with st.sidebar:
         st.markdown(f'<div class="tk-brand" style="color:{theme.INDIGO}">'
                     f'{KNOT_MARK.format(size=22)}'
-                    '<span style="font-weight:700;font-size:1.25rem;letter-spacing:-.03em">KNOTE</span></div>',
+                    '<span class="notranslate" translate="no" style="font-weight:700;font-size:1.25rem;letter-spacing:-.03em">KNOTE</span></div>',
                     unsafe_allow_html=True)
         st.caption("お話が楽しくなる。お客様との絆が、結ばれる。")
         st.divider()
