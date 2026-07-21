@@ -1,4 +1,4 @@
-"""TalKnot 共通 UI コンポーネント（ロゴ・ヒーロー・評価項目カードなど）。"""
+"""KNOTE 共通 UI コンポーネント（ロゴ・ヒーロー・評価項目カードなど）。"""
 from __future__ import annotations
 
 import streamlit as st
@@ -8,16 +8,33 @@ from core.models import EvaluationResult
 from ui import theme
 
 
+# ブランドマーク：ヒモではなく、一本の線が交差する幾何学的な「結び目」。
+KNOT_MARK = (
+    '<svg viewBox="0 0 100 100" width="{size}" height="{size}" aria-hidden="true" '
+    'style="flex:none;display:block">'
+    '<path d="M32 32 A18 18 0 1 1 50 50 A18 18 0 1 0 68 68" fill="none" '
+    'stroke="currentColor" stroke-width="7" stroke-linecap="round" opacity=".95"/>'
+    '<path d="M68 32 A18 18 0 1 0 50 50" fill="none" '
+    'stroke="currentColor" stroke-width="7" stroke-linecap="round" opacity=".55"/>'
+    "</svg>"
+)
+
+
 def hero(subtitle: str | None = None, compact: bool = False) -> None:
     """ブランドロゴ入りのヒーローヘッダー。"""
     tagline = (
         f'<div class="tk-tagline">{subtitle}</div>' if subtitle and not compact else ""
     )
     klass = "tk-hero compact" if compact else "tk-hero"
+    size = 34 if compact else 52
     st.markdown(
         f"""
         <div class="{klass}">
-            <h1 class="tk-logo">トーク<span class="knot">🪢</span>ノット</h1>
+            <div class="tk-brand">
+                {KNOT_MARK.format(size=size)}
+                <h1 class="tk-logo">KNOTE</h1>
+                <span class="tk-reading">ノート</span>
+            </div>
             {tagline}
         </div>
         """,
@@ -187,7 +204,10 @@ def evaluation_result(result: EvaluationResult) -> None:
 def sidebar(user: dict) -> None:
     """ログイン中ユーザー情報とナビゲーションを表示するサイドバー。"""
     with st.sidebar:
-        st.markdown("### トークノット 🪢")
+        st.markdown(f'<div class="tk-brand" style="color:{theme.INDIGO}">'
+                    f'{KNOT_MARK.format(size=22)}'
+                    '<span style="font-weight:700;font-size:1.25rem;letter-spacing:-.03em">KNOTE</span></div>',
+                    unsafe_allow_html=True)
         st.caption("お話が楽しくなる。お客様との絆が、結ばれる。")
         st.divider()
         st.markdown(f"**{user.get('name', 'ゲスト')}**")

@@ -1,4 +1,4 @@
-"""TalKnot のビジュアルアイデンティティ（カラー・フォント・CSS）。
+"""KNOTE のビジュアルアイデンティティ（カラー・フォント・CSS）。
 
 コンセプト：Talk（話す）＋ Knot（結び目・絆）。
 ふたりの会話が結ばれていくイメージを、コーラル→インディゴのグラデーションで表現。
@@ -56,23 +56,30 @@ html, body, [class*="css"] {{
     margin-bottom: 1.7rem;
 }}
 .tk-hero::after {{
-    content: "🪢";
+    content: "";
     position: absolute;
-    right: 1.6rem; bottom: -0.6rem;
-    font-size: 6.5rem; opacity: 0.16;
-    transform: rotate(-8deg);
+    right: -1.2rem; bottom: -3.2rem;
+    width: 190px; height: 190px; border-radius: 50%;
+    border: 22px solid rgba(255,255,255,0.13);
+    border-right-color: transparent; border-bottom-color: transparent;
+    transform: rotate(-18deg);
 }}
 .tk-hero.compact {{ padding: 1.25rem 1.8rem; border-radius: 20px; }}
-.tk-hero.compact::after {{ font-size: 3.6rem; bottom: -0.4rem; }}
+.tk-hero.compact::after {{ width: 118px; height: 118px; border-width: 14px; bottom: -2.1rem; }}
+.tk-brand {{ display: flex; align-items: center; gap: 0.85rem; }}
 .tk-logo {{
-    font-family: 'Quicksand', sans-serif;
+    font-family: 'Helvetica Neue', Arial, sans-serif;
     font-weight: 700;
     font-size: 2.9rem;
-    letter-spacing: 0.5px;
-    margin: 0; line-height: 1.05;
+    letter-spacing: -0.035em;
+    margin: 0; line-height: 1.02;
 }}
-.tk-logo .knot {{ filter: drop-shadow(0 2px 6px rgba(0,0,0,.18)); }}
+.tk-reading {{
+    font-size: 0.78rem; letter-spacing: 0.22em; opacity: 0.72;
+    align-self: flex-end; padding-bottom: 0.5rem;
+}}
 .tk-hero.compact .tk-logo {{ font-size: 1.9rem; }}
+.tk-hero.compact .tk-reading {{ font-size: 0.68rem; padding-bottom: 0.25rem; }}
 .tk-tagline {{ font-size: 1.08rem; opacity: 0.96; margin-top: 0.5rem; font-weight: 500; }}
 
 /* --- カード --- */

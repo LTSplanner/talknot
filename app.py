@@ -1,4 +1,4 @@
-"""TalKnot（トークノット）— 営業商談・ロープレ評価 Web アプリ
+"""KNOTE（ノート）— 営業商談・ロープレ評価 Web アプリ
 
 Talk（話す）＋ Knot（結び目・絆）。
 お客様との会話が弾み、絆が結ばれる商談へ導くための、ポジティブな振り返りツール。
@@ -37,9 +37,11 @@ from core.models import EvaluationResult  # noqa: E402
 from services import drive_sa, gemini_analyzer, google_drive, storage, usage_log  # noqa: E402
 from ui import components, theme  # noqa: E402
 
+_BRAND_ICON = Path(__file__).parent / "assets" / "knote_icon.png"
+
 st.set_page_config(
-    page_title="トークノット｜営業ロープレ評価",
-    page_icon="🪢",
+    page_title="KNOTE（ノート）｜営業ロープレ評価",
+    page_icon=str(_BRAND_ICON) if _BRAND_ICON.exists() else "📓",
     layout="wide",
     initial_sidebar_state="auto",  # スマホでは自動で折りたたむ
 )
@@ -1151,7 +1153,7 @@ def render_app(user: dict) -> None:
     with history:
         render_history_tab(user)
     with about:
-        st.markdown("##### TalKnot が見る 5 つの視点")
+        st.markdown("##### KNOTE が見る 5 つの視点")
         components.criteria_overview()
 
 
