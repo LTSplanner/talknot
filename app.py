@@ -546,6 +546,129 @@ def render_history_tab(user: dict) -> None:
                 components.evaluation_result(EvaluationResult.from_dict(rec["result"]))
 
 
+def _roleplay_worker(
+    job_id: str, user_email: str, label: str,
+    audio_turns: list, scenario_lines: list,
+) -> None:
+    """1人ロープレの録音をまとめて1回だけ Gemini で評価する（背景実行）。"""
+    try:
+        with _ANALYSIS_SLOTS:
+            result = gemini_analyzer.analyze_roleplay(
+                audio_turns, scenario_lines,
+                storage.get_talk_script() or None,
+                storage.get_knowledge_base(),
+            )
+        storage.finish_evaluation(user_email, job_id, result, label)
+        storage.append_knowledge(result.knowledge)
+        usage_log.log("roleplay", user_email=user_email, ok=True, source="streamlit-bg")
+    except Exception as exc:  # noqa: BLE001
+        storage.fail_evaluation(user_email, job_id, _friendly_gemini_error(exc), label)
+        usage_log.log("roleplay", user_email=user_email, ok=False, source="streamlit-bg")
+    finally:
+        gc.collect()
+
+
+def _start_roleplay_job(user: dict, scenario: dict, audio_turns: list) -> None:
+    job_id = time.strftime("%Y%m%d_%H%M%S") + "_" + uuid.uuid4().hex[:6]
+    label = f"🎙️1人ロープレ｜{scenario.get('title','')}"
+    storage.start_evaluation(user["email"], job_id, label)
+    threading.Thread(
+        target=_roleplay_worker,
+        kwargs=dict(job_id=job_id, user_email=user["email"], label=label,
+                    audio_turns=audio_turns, scenario_lines=scenario.get("lines", [])),
+        daemon=True,
+    ).start()
+
+
+def _reset_roleplay() -> None:
+    for k in [k for k in st.session_state if str(k).startswith("rp_")]:
+        del st.session_state[k]
+
+
+def render_roleplay_tab(user: dict) -> None:
+    st.markdown("##### 🎙️ 1人ロープレ（AIのお客様と対話 → その場で評価）")
+    st.write(
+        "相手役がいなくても、**1人でいつでも**ロープレできます。台本のお客様に対して"
+        "声で応答し、最後に模範トークスクリプト基準で評価します。"
+    )
+
+    scenarios = storage.get_scenarios()
+    titles = {s["id"]: s.get("title", s["id"]) for s in scenarios}
+    sid = st.selectbox(
+        "シナリオを選ぶ", options=list(titles), format_func=lambda i: titles[i],
+        key="rp_scenario", disabled=bool(st.session_state.get("rp_audio")),
+    )
+    scenario = storage.get_scenario(sid) or scenarios[0]
+    lines = scenario.get("lines", [])
+    if not storage.get_talk_script():
+        st.caption("⚠️ 模範トークスクリプトが未登録です（下の管理者欄で登録すると、その型を基準に採点します）。")
+
+    audio = st.session_state.setdefault("rp_audio", [])
+    turn = len(audio)
+
+    if turn < len(lines):
+        st.divider()
+        st.caption(f"ターン {turn + 1} / {len(lines)}")
+        st.markdown(f"#### 🧑 お客様\n> {lines[turn]}")
+
+        ready_key = f"rp_ready_{turn}"
+        if not st.session_state.get(ready_key):
+            if st.button("▶ このターンを話す（3秒カウントダウン）", key=f"rp_go_{turn}",
+                         use_container_width=True):
+                ph = st.empty()
+                for n in (3, 2, 1):
+                    ph.markdown(f"<h1 style='text-align:center'>{n}</h1>", unsafe_allow_html=True)
+                    time.sleep(1)
+                ph.markdown("<h3 style='text-align:center'>🎤 どうぞ！</h3>", unsafe_allow_html=True)
+                st.session_state[ready_key] = True
+                st.rerun()
+        else:
+            rec = st.audio_input("マイクを押して話す（1ターン40秒以内が目安）", key=f"rp_rec_{turn}")
+            if rec is not None:
+                if st.button("✅ このターンを確定して次へ", key=f"rp_next_{turn}",
+                             use_container_width=True):
+                    audio.append(rec.getvalue())
+                    st.rerun()
+    else:
+        st.success(f"全 {len(lines)} ターン録音できました。評価に進めます。")
+
+    st.divider()
+    c1, c2 = st.columns(2)
+    with c1:
+        if audio and st.button("🤖 終了して評価する", type="primary", use_container_width=True):
+            _start_roleplay_job(user, scenario, list(audio))
+            _reset_roleplay()
+            st.success("✅ 評価を開始しました。**この画面を閉じても大丈夫**です。")
+            st.info("結果は「🕘 評価履歴」タブに出ます（混雑時は順番待ち）。")
+    with c2:
+        if audio and st.button("↩️ やり直す（録音を破棄）", use_container_width=True):
+            _reset_roleplay()
+            st.rerun()
+
+    if settings.is_admin(user.get("email")):
+        _render_script_admin()
+
+
+def _render_script_admin() -> None:
+    """管理者向け：模範トークスクリプトの登録（ロープレ評価の基準になる）。"""
+    with st.expander("📝 模範トークスクリプトを登録（管理者）"):
+        st.caption("研修で標準化したトークスクリプトを貼ってください。ロープレ評価の"
+                   "🎯模範トーク視点は、この型をどれだけ再現できたかで採点されます。")
+        current = storage.get_talk_script()
+        text = st.text_area("トークスクリプト本文", value=current, height=260, key="rp_script")
+        c1, c2 = st.columns(2)
+        with c1:
+            if st.button("💾 保存する", key="rp_script_save", use_container_width=True):
+                storage.set_talk_script(text)
+                st.success(f"保存しました（{len(text.strip()):,} 文字）。")
+                st.rerun()
+        with c2:
+            if current and st.button("🗑️ 消去", key="rp_script_clear", use_container_width=True):
+                storage.set_talk_script("")
+                st.success("消去しました。")
+                st.rerun()
+
+
 _CATEGORY_LABELS = {
     "product": "🏠 商品知識",
     "rule": "📏 社内ルール",
@@ -781,11 +904,14 @@ def render_app(user: dict) -> None:
     components.sidebar(user)
     components.hero(compact=True)
 
-    evaluate, reference, knowledge, history, about = st.tabs(
-        ["🎥 商談を評価する", "⭐ 模範トーク", "🧠 弊社ナレッジ", "🕘 評価履歴", "📊 評価項目について"]
+    evaluate, roleplay, reference, knowledge, history, about = st.tabs(
+        ["🎥 商談を評価する", "🎙️ 1人ロープレ", "⭐ 模範トーク", "🧠 弊社ナレッジ",
+         "🕘 評価履歴", "📊 評価項目について"]
     )
     with evaluate:
         render_evaluate_tab(user)
+    with roleplay:
+        render_roleplay_tab(user)
     with reference:
         render_reference_tab(user)
     with knowledge:

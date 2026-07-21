@@ -30,6 +30,9 @@ _DOC_KINDS = {
     "base": ("knowledge_doc.txt", "KnowledgeDoc"),
     "faq": ("knowledge_faq.txt", "KnowledgeFAQ"),
     "meetings": ("knowledge_meetings.txt", "KnowledgeMeetings"),
+    # 1人ロープレ用：模範トークスクリプト本文と、シナリオ台本(JSON)
+    "script": ("talk_script.txt", "TalkScript"),
+    "scenarios": ("roleplay_scenarios.json", "RoleplayScenarios"),
 }
 _KNOWLEDGE_DOC_BUDGET = 60000   # base 上限
 _FAQ_DOC_BUDGET = 45000         # faq 上限
@@ -41,7 +44,7 @@ def _doc_budget(kind: str) -> int:
         "base": _KNOWLEDGE_DOC_BUDGET,
         "faq": _FAQ_DOC_BUDGET,
         "meetings": _MEETINGS_DOC_BUDGET,
-    }[kind]
+    }.get(kind, 60000)
 
 
 _DOC_HEADERS = {
@@ -528,6 +531,73 @@ def distill_meeting_knowledge() -> int:
         count += 1
     set_knowledge_doc("\n".join(lines) if count else "", kind="meetings")
     return count
+
+
+# --- 1人ロープレ：模範トークスクリプト と シナリオ台本 ------------------------- #
+# 会話中はAIを呼ばず台本で進めるため、無料枠でも1セッション＝Gemini1回で済む。
+_DEFAULT_SCENARIOS = [
+    {
+        "id": "first_meeting",
+        "title": "初回商談（ヒアリング〜提案の入口）",
+        "lines": [
+            "はじめまして。今日はよろしくお願いします。……正直、オプションって何を頼めばいいのか、よく分かっていなくて。",
+            "なるほど。ただ、マンションのオプション会でも似た話を聞いたんですが、あちらより高くなったりしませんか？",
+            "うーん、予算もあるので……。実際、どのくらいかかるものなんでしょうか。",
+            "そうなんですね。ちょっと妻とも相談したいので、今日は決めきれないかもしれません。",
+            "分かりました。ではまず見積もりだけ、お願いできますか。",
+        ],
+    },
+    {
+        "id": "objection",
+        "title": "反論対応（価格・他社比較・先延ばし）",
+        "lines": [
+            "お話は分かったんですが、正直ちょっと高いなという印象です。",
+            "他社さんでも同じような施工をやっていて、そちらの方が安かったんですよね。",
+            "急いでいないので、入居してから考えても良いかなと思っていて。",
+            "主人が『今は要らないんじゃないか』と言っていて、説得できる自信がなくて。",
+        ],
+    },
+    {
+        "id": "closing",
+        "title": "クロージング（決断の後押し）",
+        "lines": [
+            "内容はだいたい理解できました。あとは決めるだけ、という感じですね。",
+            "ただ、本当にこの内容で足りるのか、少し不安があります。",
+            "もし後から追加したくなったら、どうなりますか？",
+            "分かりました。では、進める方向で考えます。",
+        ],
+    },
+]
+
+
+def get_talk_script() -> str:
+    """1人ロープレの評価基準にする『模範トークスクリプト』本文。"""
+    return _load_knowledge_doc("script")
+
+
+def set_talk_script(text: str) -> None:
+    set_knowledge_doc(text, kind="script")
+
+
+def get_scenarios() -> list[dict]:
+    """ロープレのシナリオ台本。未登録なら既定シナリオを返す。"""
+    raw = _load_knowledge_doc("scenarios").strip()
+    if raw:
+        try:
+            items = json.loads(raw)
+            if isinstance(items, list) and items:
+                return items
+        except json.JSONDecodeError:
+            pass
+    return _DEFAULT_SCENARIOS
+
+
+def set_scenarios(items: list[dict]) -> None:
+    set_knowledge_doc(json.dumps(items, ensure_ascii=False, indent=2), kind="scenarios")
+
+
+def get_scenario(scenario_id: str) -> dict | None:
+    return next((s for s in get_scenarios() if s.get("id") == scenario_id), None)
 
 
 def clear_meeting_insights() -> None:

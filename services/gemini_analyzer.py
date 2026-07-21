@@ -91,6 +91,40 @@ def analyze(
     return EvaluationResult.from_dict(data)
 
 
+def analyze_roleplay(
+    audio_turns: list[bytes],
+    scenario_lines: list[str],
+    talk_script: str | None = None,
+    knowledge_base: str | None = None,
+    mime_type: str = "audio/wav",
+) -> EvaluationResult:
+    """1人ロープレの録音（ターンごと）をまとめて1回の呼び出しで評価する。
+
+    会話中は AI を呼ばず台本で進めるため、Gemini の呼び出しはこの1回だけ＝無料枠にやさしい。
+    """
+    client = _client()
+    prompt = prompts.build_roleplay_prompt(scenario_lines, talk_script, knowledge_base)
+
+    contents: list = []
+    for i, data in enumerate(audio_turns, 1):
+        if not data:
+            continue
+        contents.append(f"--- T{i}（お客様「{scenario_lines[i-1]}」への応答）---"
+                        if i <= len(scenario_lines) else f"--- T{i} ---")
+        contents.append(types.Part.from_bytes(data=data, mime_type=mime_type))
+    contents.append(prompt)
+
+    response = client.models.generate_content(
+        model=settings.GEMINI_MODEL,
+        contents=contents,
+        config=types.GenerateContentConfig(
+            response_mime_type="application/json",
+            max_output_tokens=16384,
+        ),
+    )
+    return EvaluationResult.from_dict(json.loads(response.text))
+
+
 # 模範トーク動画を「テキスト基準」に変換するためのプロンプト
 _REFERENCE_TRANSCRIBE_PROMPT = (
     "この動画は住宅営業の『模範商談』です。後輩が学べる基準テキストを作ってください。\n"

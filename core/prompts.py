@@ -8,6 +8,38 @@ from __future__ import annotations
 from config import settings
 
 
+def build_roleplay_prompt(
+    scenario_lines: list[str],
+    talk_script: str | None = None,
+    knowledge_base: str | None = None,
+) -> str:
+    """1人ロープレ（台本のお客様 × 音声で応答）の評価プロンプト。
+
+    添付音声は「営業役（練習者）の発話だけ」。お客様のセリフは下の台本で進行している。
+    評価の構造は通常の商談評価と同じ JSON に揃える（履歴・UIをそのまま使うため）。
+    """
+    base = build_evaluation_prompt(reference_talk=talk_script, knowledge_base=knowledge_base)
+    lines = "\n".join(f"{i+1}. お客様「{t}」" for i, t in enumerate(scenario_lines))
+    script_note = (
+        "上の『模範トーク（社内基準）』が今回の**模範トークスクリプト**です。"
+        "reference（🎯模範トーク視点）は、このスクリプトの型・流れ・言い回しを"
+        "どれだけ再現できたかで採点してください。"
+        if talk_script
+        else "模範トークスクリプトが未登録のため、reference は住宅営業の基本の型を基準にします。"
+    )
+    return f"""{base}
+
+# 【重要】これは「1人ロープレ」の音声です
+- 添付音声には **営業役（練習者）の発話だけ** が入っています。お客様の声は入っていません。
+- お客様は次の台本どおりに話した前提で、営業役がその間に応答しています：
+{lines}
+- 各録音は、上の台本のお客様セリフに対する「営業役の返答」の順番に対応します。
+- {script_note}
+- お客様の声が無いため、感情の読み取りは「営業役の間・トーン・言い回し」と、
+  台本のお客様セリフから推測できる心理をもとに評価してください。
+- feedback の timestamp は、何ターン目かを "T1" "T2" のように記してください。"""
+
+
 def build_evaluation_prompt(
     reference_talk: str | None = None,
     knowledge_base: str | None = None,
