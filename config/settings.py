@@ -122,6 +122,16 @@ MINUTES_FOLDER_ID = os.getenv("MINUTES_FOLDER_ID", "14yefycrO6ylPVT0LAqbh10HjrDV
 # 議事録抽出に使うモデル（無料枠の広いものを推奨）。
 MINUTES_EXTRACT_MODEL = os.getenv("MINUTES_EXTRACT_MODEL", "gemini-2.5-flash-lite")
 
+# --- 施工事例ギャラリー（フックツール）---
+# 施工事例の写真を保存する共有 Drive フォルダ。知識SAに「編集者」で共有しておく。
+# アップロードは管理者のみ、閲覧・ダウンロードは全ユーザー可。
+GALLERY_FOLDER_ID = os.getenv("GALLERY_FOLDER_ID", "")
+# 施工事例のカテゴリ（アップロード時に選ぶ）。
+GALLERY_CATEGORIES = _csv_env(
+    "GALLERY_CATEGORIES",
+    "コーティング,エコカラット,ダウンライト,オーダー家具,窓フィルム,その他",
+)
+
 # --- LTS共通「利用ログ」への記録 ---
 # 誰が・どのツールを・いつ使ったかを共通シートに集約する。
 USAGE_LOG_SHEET_ID = os.getenv(

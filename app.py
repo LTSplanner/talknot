@@ -1318,14 +1318,16 @@ def render_app(user: dict) -> None:
     components.sidebar(user)
     components.hero(compact=True)
 
-    evaluate, roleplay, reference, knowledge, history, about = st.tabs(
-        ["🎥 商談を評価する", "🎙️ 1人ロープレ", "⭐ 模範トーク", "🧠 弊社ナレッジ",
-         "🕘 評価履歴", "📊 評価項目について"]
+    evaluate, roleplay, gallery, reference, knowledge, history, about = st.tabs(
+        ["🎥 商談を評価する", "🎙️ 1人ロープレ", "📸 施工事例", "⭐ 模範トーク",
+         "🧠 弊社ナレッジ", "🕘 評価履歴", "📊 評価項目について"]
     )
     with evaluate:
         render_evaluate_tab(user)
     with roleplay:
         render_roleplay_tab(user)
+    with gallery:
+        render_gallery_tab(user)
     with reference:
         render_reference_tab(user)
     with knowledge:
@@ -1335,6 +1337,84 @@ def render_app(user: dict) -> None:
     with about:
         st.markdown("##### KNOTE が見る 5 つの視点")
         components.criteria_overview()
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def _gallery_photo_bytes(file_id: str) -> bytes:
+    from services import gallery
+    return gallery.photo_bytes(file_id)
+
+
+def render_gallery_tab(user: dict) -> None:
+    from services import gallery
+
+    st.markdown("##### 📸 施工事例（お客様に見せるフック）")
+    st.write(
+        "商談で見せる施工事例の写真を、チームで共有します。"
+        "**アップロードは管理者のみ**／**閲覧・ダウンロードは全員**できます。"
+    )
+    is_admin = settings.is_admin(user.get("email"))
+
+    if not gallery.configured():
+        st.warning(
+            "施工事例フォルダが未設定です。共有ドライブに写真用フォルダを作り、"
+            "知識SA（talknot-knowledge@eigyou-ro-pure.iam.gserviceaccount.com）に"
+            "「編集者」で共有 → そのフォルダIDを `GALLERY_FOLDER_ID` に設定してください。"
+        )
+        return
+
+    # 管理者：アップロード
+    if is_admin:
+        with st.expander("⬆️ 施工事例をアップロード（管理者）", expanded=False):
+            files = st.file_uploader(
+                "写真（複数可）", type=["jpg", "jpeg", "png", "webp"],
+                accept_multiple_files=True, key="gal_up",
+            )
+            cat = st.selectbox("カテゴリ", settings.GALLERY_CATEGORIES, key="gal_cat")
+            caption = st.text_input("キャプション（任意・お客様への説明メモ）", key="gal_cap")
+            if files and st.button("この内容でアップロード", key="gal_do"):
+                ok = 0
+                for f in files:
+                    try:
+                        gallery.upload_photo(f.getvalue(), f.name, cat, caption,
+                                             f.type or "image/jpeg")
+                        ok += 1
+                    except Exception as e:  # noqa: BLE001
+                        st.error(f"{f.name}: {str(e)[:120]}")
+                if ok:
+                    _gallery_photo_bytes.clear()
+                    st.success(f"{ok} 枚アップロードしました。")
+                    st.rerun()
+
+    # 全員：閲覧＋ダウンロード
+    fcat = st.selectbox("カテゴリで絞り込み", ["すべて"] + list(settings.GALLERY_CATEGORIES),
+                        key="gal_filter")
+    try:
+        photos = gallery.list_photos(fcat)
+    except Exception as e:  # noqa: BLE001
+        st.error(f"写真の読み込みに失敗しました：{str(e)[:150]}")
+        return
+    if not photos:
+        st.caption("まだ施工事例がありません。")
+        return
+
+    st.caption(f"{len(photos)} 枚")
+    cols = st.columns(3)
+    for i, p in enumerate(photos):
+        with cols[i % 3]:
+            try:
+                data = _gallery_photo_bytes(p["id"])
+                st.image(data, use_container_width=True,
+                         caption=f"[{p['category']}] {p['caption']}".strip(" []"))
+                st.download_button("⬇️ ダウンロード", data=data, file_name=p["name"],
+                                   key=f"gal_dl_{p['id']}", use_container_width=True)
+            except Exception:
+                st.caption(f"（表示できませんでした：{p['name']}）")
+            if is_admin and st.button("🗑️ 削除", key=f"gal_del_{p['id']}",
+                                      use_container_width=True):
+                gallery.delete_photo(p["id"])
+                _gallery_photo_bytes.clear()
+                st.rerun()
 
 
 def main() -> None:
