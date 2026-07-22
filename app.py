@@ -1069,12 +1069,49 @@ def _render_script_admin() -> None:
         if target:
             body = st.text_area(f"「{tab}」の内容（{len(target.get('body','')):,}字）",
                                 value=target.get("body", ""), height=320, key=f"rp_sc_body_{tab}")
-            if st.button("💾 この単元を更新", key=f"rp_sc_save_{tab}", use_container_width=True):
-                if storage.update_talk_script_item(tab, body):
-                    st.success(f"「{tab}」を更新しました。")
+            c1, c2 = st.columns(2)
+            with c1:
+                if st.button("💾 この単元を更新", key=f"rp_sc_save_{tab}", use_container_width=True):
+                    if storage.update_talk_script_item(tab, body):
+                        st.success(f"「{tab}」を更新しました。")
+                        st.rerun()
+                    else:
+                        st.error("更新できませんでした。")
+            with c2:
+                if st.button("🤖 AIで整文提案", key=f"rp_sc_ai_{tab}", use_container_width=True):
+                    with st.spinner("営業目線で整文しています…"):
+                        try:
+                            st.session_state[f"rp_sc_prop_{tab}"] = \
+                                gemini_analyzer.refine_talk_script(body)
+                        except Exception as e:  # noqa: BLE001
+                            st.session_state[f"rp_sc_prop_{tab}"] = ""
+                            st.error(f"整文に失敗しました：{_friendly_gemini_error(e)}")
                     st.rerun()
-                else:
-                    st.error("更新できませんでした。")
+
+            # AIの整文案を確認して、OKなら反映
+            proposal = st.session_state.get(f"rp_sc_prop_{tab}")
+            if proposal:
+                st.markdown("**🤖 AI整文案（プレビュー）** — 内容はそのまま、言い回しを整えました")
+                col_o, col_n = st.columns(2)
+                with col_o:
+                    st.caption(f"現在（{len(body):,}字）")
+                    st.text(body[:1500] + ("…" if len(body) > 1500 else ""))
+                with col_n:
+                    st.caption(f"AI整文案（{len(proposal):,}字）")
+                    st.text(proposal[:1500] + ("…" if len(proposal) > 1500 else ""))
+                a1, a2 = st.columns(2)
+                with a1:
+                    if st.button("✅ この案で更新する", key=f"rp_sc_apply_{tab}",
+                                 type="primary", use_container_width=True):
+                        if storage.update_talk_script_item(tab, proposal):
+                            st.session_state.pop(f"rp_sc_prop_{tab}", None)
+                            st.success(f"「{tab}」をAI整文案で更新しました。")
+                            st.rerun()
+                with a2:
+                    if st.button("✖️ 却下する", key=f"rp_sc_reject_{tab}",
+                                 use_container_width=True):
+                        st.session_state.pop(f"rp_sc_prop_{tab}", None)
+                        st.rerun()
 
         st.divider()
         if st.button("🗑️ スクリプトをすべて消去", key="rp_script_clear"):

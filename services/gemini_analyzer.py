@@ -127,6 +127,28 @@ def analyze_roleplay(
     return EvaluationResult.from_dict(json.loads(response.text))
 
 
+_REFINE_PROMPT = (
+    "あなたは住宅リフォームのトップ営業兼トークコーチです。次の営業トークスクリプトを、"
+    "実際にお客様の前で話しやすいように整文してください。\n"
+    "ルール：\n"
+    "- 意味・伝える情報・話す順番は変えない（勝手に内容を足さない/消さない）。\n"
+    "- くどい言い回し・重複・冗長な相槌を削り、自然な話し言葉に整える。\n"
+    "- お客様目線で分かりやすく、専門用語には一言添える程度に。\n"
+    "- 【見出し】や「Q.」などの構造・記号はそのまま残す。\n"
+    "- 出力は整文後の本文のみ（説明や前置きは書かない）。日本語。"
+)
+
+
+def refine_talk_script(text: str, model: str | None = None) -> str:
+    """営業コーチ視点でトークスクリプトを整文した案を返す（Gemini 1回）。"""
+    client = _client()
+    resp = client.models.generate_content(
+        model=model or settings.MINUTES_EXTRACT_MODEL,
+        contents=_REFINE_PROMPT + "\n\n---元のスクリプト---\n" + (text or "")[:12000],
+    )
+    return (resp.text or "").strip()
+
+
 # 模範トーク動画を「テキスト基準」に変換するためのプロンプト
 _REFERENCE_TRANSCRIBE_PROMPT = (
     "この動画は住宅営業の『模範商談』です。後輩が学べる基準テキストを作ってください。\n"
