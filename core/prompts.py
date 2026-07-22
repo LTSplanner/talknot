@@ -8,11 +8,33 @@ from __future__ import annotations
 from config import settings
 
 
+def _persona_block(persona: dict | None) -> str:
+    """議事録から作ったお客様ペルソナ（実データ準拠の反応傾向）を注記にする。"""
+    if not isinstance(persona, dict) or not persona:
+        return ""
+    parts = []
+    labels = {"decided": "検討済みのお客様", "undecided": "未検討のお客様"}
+    for key, label in labels.items():
+        p = persona.get(key) or {}
+        c = "／".join((p.get("concerns") or [])[:5])
+        o = "／".join((p.get("objections") or [])[:5])
+        if c or o:
+            parts.append(f"■{label}：よくある本音=［{c}］／断り文句=［{o}］")
+    if not parts:
+        return ""
+    return (
+        "\n# 弊社のお客様の実像（過去の商談から）\n"
+        "実際の商談で頻出する反応です。営業役がこうした本音・断りを想定して"
+        "先回りできていたかも評価に含めてください。\n" + "\n".join(parts) + "\n"
+    )
+
+
 def build_roleplay_prompt(
     scenario_lines: list[str],
     talk_script: str | None = None,
     knowledge_base: str | None = None,
     focus: str | None = None,
+    persona: dict | None = None,
 ) -> str:
     """1人ロープレ（台本のお客様 × 音声で応答）の評価プロンプト。
 
@@ -21,7 +43,7 @@ def build_roleplay_prompt(
     """
     base = build_evaluation_prompt(reference_talk=talk_script, knowledge_base=knowledge_base)
     lines = "\n".join(f"{i+1}. お客様「{t}」" for i, t in enumerate(scenario_lines))
-    focus_block = _focus_block(focus)
+    focus_block = _focus_block(focus) + _persona_block(persona)
     script_note = (
         "上の『模範トーク（社内基準）』が今回の**模範トークスクリプト**です。"
         "reference（🎯模範トーク視点）は、このスクリプトの型・流れ・言い回しを"

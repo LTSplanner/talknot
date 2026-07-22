@@ -894,6 +894,7 @@ def _roleplay_worker(
                 storage.get_talk_script() or None,
                 storage.get_knowledge_base(),
                 focus=focus,
+                persona=storage.get_customer_persona(),
             )
         storage.finish_evaluation(user_email, job_id, result, label)
         storage.append_knowledge(result.knowledge)
@@ -909,7 +910,7 @@ def _start_roleplay_job(user: dict, scenario: dict, audio_turns: list) -> None:
     job_id = time.strftime("%Y%m%d_%H%M%S") + "_" + uuid.uuid4().hex[:6]
     label = f"🎙️1人ロープレ｜{scenario.get('title','')}"
     storage.start_evaluation(user["email"], job_id, label)
-    lines = [t["customer"] for t in storage.scenario_turns(scenario)]
+    lines = [t["customer"] for t in storage.persona_flavored_turns(scenario)]
     threading.Thread(
         target=_roleplay_worker,
         kwargs=dict(job_id=job_id, user_email=user["email"], label=label,
@@ -955,7 +956,7 @@ def render_roleplay_tab(user: dict) -> None:
         sid = st.selectbox("単元を選ぶ", options=list(titles),
                            format_func=lambda i: titles[i], key="rp_scenario", disabled=locked)
     scenario = storage.get_scenario(sid) or items[0]
-    turns = storage.scenario_turns(scenario)
+    turns = storage.persona_flavored_turns(scenario)
     lv = scenario.get("level", 1)
     st.caption(
         f"👤 お客様タイプ：**{scenario.get('customer_type','検討済み')}**　"

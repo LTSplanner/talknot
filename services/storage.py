@@ -33,6 +33,8 @@ _DOC_KINDS = {
     # 1人ロープレ用：模範トークスクリプト本文と、シナリオ台本(JSON)
     "script": ("talk_script.txt", "TalkScript"),
     "scenarios": ("roleplay_scenarios.json", "RoleplayScenarios"),
+    # 議事録から作ったお客様ペルソナ（属性別の反応・不安・口ぐせ・断り文句）
+    "persona": ("customer_persona.json", "CustomerPersona"),
 }
 _KNOWLEDGE_DOC_BUDGET = 60000   # base 上限
 _FAQ_DOC_BUDGET = 45000         # faq 上限
@@ -757,6 +759,45 @@ def set_scenarios(items: list[dict]) -> None:
 
 def get_scenario(scenario_id: str) -> dict | None:
     return next((s for s in get_scenarios() if s.get("id") == scenario_id), None)
+
+
+def persona_flavored_turns(scenario: dict) -> list[dict]:
+    """台本のターンに、議事録由来のお客様ペルソナの“生の言い回し”を混ぜて返す。
+
+    決定的（同じ単元なら毎回同じ）なので、画面表示と評価で結果が一致する。
+    ペルソナ未生成なら通常の台本をそのまま返す。
+    """
+    turns = scenario_turns(scenario)
+    persona = get_customer_persona()
+    ctype = "undecided" if scenario.get("customer_type") == "未検討" else "decided"
+    p = persona.get(ctype, {}) if isinstance(persona, dict) else {}
+    openings = [o for o in (p.get("opening") or []) if o]
+    if not turns or not openings:
+        return turns
+    # 単元IDから決定的に第一声を選ぶ（ランダムに見えて毎回同じ）
+    seed = sum(ord(c) for c in scenario.get("id", "")) % len(openings)
+    turns = [dict(t) for t in turns]
+    turns[0] = dict(turns[0])
+    turns[0]["customer"] = openings[seed]
+    return turns
+
+
+_PERSONA_NAME = "customer_persona.json"
+
+
+def set_customer_persona(persona: dict) -> None:
+    """議事録から作ったお客様ペルソナ（属性別の反応・不安・口ぐせ・断り文句）を保存。"""
+    set_knowledge_doc(json.dumps(persona, ensure_ascii=False), kind="persona")
+
+
+def get_customer_persona() -> dict:
+    raw = _load_knowledge_doc("persona").strip()
+    if not raw:
+        return {}
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
 
 
 def clear_meeting_insights() -> None:
