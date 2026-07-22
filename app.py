@@ -572,6 +572,102 @@ def _render_practice_overview(all_records: list[dict]) -> None:
     st.dataframe(rows, use_container_width=True, hide_index=True)
 
 
+def _is_roleplay(rec: dict) -> bool:
+    return str(rec.get("label", "")).startswith("🎙️")
+
+
+def _avg_score(result: dict | None) -> float | None:
+    """1件の評価から、営業プロ視点の平均点（1〜5）を返す。"""
+    if not result:
+        return None
+    scores = result.get("scores") or []
+    vals = [int(s.get("sales_score") or 0) for s in scores if s.get("sales_score")]
+    return round(sum(vals) / len(vals), 2) if vals else None
+
+
+def _render_member_dashboard(who: str, records: list[dict]) -> None:
+    """メンバー個人の成長ダッシュボード（推移グラフ＋左右2カラム一覧）。"""
+    done = [r for r in records if r.get("status") == "done" and r.get("result")]
+    roleplay = [r for r in records if _is_roleplay(r)]
+    meeting = [r for r in records if not _is_roleplay(r)]
+
+    # --- サマリ指標 ---
+    st.markdown(f"#### 📈 {who.split('@')[0]} さんの成長ダッシュボード")
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("🎙️ ロープレ", f"{len(roleplay)} 回")
+    m2.metric("🎥 商談評価", f"{len(meeting)} 回")
+    scored = [(_avg_score(r["result"]), r) for r in done]
+    scored = [(v, r) for v, r in scored if v is not None]
+    scored.sort(key=lambda x: x[1].get("saved_at", ""))
+    if scored:
+        first, last = scored[0][0], scored[-1][0]
+        m3.metric("平均スコア（最新）", f"{last:.2f} / 5", delta=f"{last - first:+.2f}")
+        m4.metric("最終実施", (scored[-1][1].get("saved_at", "")[:10]) or "-")
+
+    # --- 成長推移（折れ線）＋ 実行推移（棒）＋ 直近の項目別（円/棒）---
+    import pandas as pd
+
+    if scored:
+        st.markdown("**スコアの推移（実施した順・営業プロ視点の平均）**")
+        df = pd.DataFrame({
+            "実施日時": [r.get("saved_at", "") for _, r in scored],
+            "スコア": [v for v, _ in scored],
+        }).set_index("実施日時")
+        st.line_chart(df, height=240)
+
+    g1, g2 = st.columns(2)
+    with g1:
+        st.markdown("**実行回数（種類別）**")
+        st.bar_chart(pd.DataFrame(
+            {"回数": [len(roleplay), len(meeting)]},
+            index=["🎙️ロープレ", "🎥商談評価"],
+        ), height=240, color="#6C5CE7")
+    with g2:
+        # 直近の完了評価の「5項目 × 営業プロ視点」を棒で
+        latest = scored[-1][1] if scored else None
+        st.markdown("**直近評価の項目別スコア**")
+        if latest and latest.get("result"):
+            rows = {}
+            for s in latest["result"].get("scores", []):
+                c = settings.CRITERIA_BY_KEY.get(s.get("key", ""))
+                rows[(c.title if c else s.get("key", ""))] = int(s.get("sales_score") or 0)
+            if rows:
+                st.bar_chart(pd.DataFrame({"点": rows.values()}, index=list(rows)),
+                             height=240, color="#FF6F61")
+        else:
+            st.caption("完了した評価がまだありません。")
+
+    # --- 左：ロープレ ／ 右：商談評価 の一覧 ---
+    st.divider()
+    left, right = st.columns(2)
+    with left:
+        st.markdown(f"##### 🎙️ 1人ロープレ（{len(roleplay)}）")
+        _render_record_list(roleplay, "rp")
+    with right:
+        st.markdown(f"##### 🎥 商談評価（{len(meeting)}）")
+        _render_record_list(meeting, "mt")
+
+
+def _render_record_list(records: list[dict], key: str) -> None:
+    """評価カードの一覧（ダッシュボードの左右カラム用）。"""
+    if not records:
+        st.caption("まだありません。")
+        return
+    for i, rec in enumerate(records):
+        status = rec.get("status", "done")
+        badge = _STATUS_BADGE.get(status, "✅ 完了")
+        sc = _avg_score(rec.get("result"))
+        sc_tag = f"　{sc:.1f}/5" if sc is not None else ""
+        title = str(rec.get("label", "")).replace("🎙️1人ロープレ｜", "")
+        with st.expander(f"{badge}{sc_tag}　{rec.get('saved_at','')[5:16]}　{title[:26]}"):
+            if status == "error":
+                st.error(rec.get("error", "解析に失敗しました。"))
+            elif rec.get("result"):
+                components.evaluation_result(EvaluationResult.from_dict(rec["result"]))
+            else:
+                st.caption("処理中です。")
+
+
 def render_history_tab(user: dict) -> None:
     st.markdown("##### 評価履歴")
 
@@ -585,9 +681,11 @@ def render_history_tab(user: dict) -> None:
             _render_practice_overview(all_records)
             members = ["全員"] + sorted({r.get("user_email", "") for r in all_records if r.get("user_email")})
             who = st.selectbox("メンバーで絞り込み", members, key="hist_member")
-            records = all_records if who == "全員" else [
-                r for r in all_records if r.get("user_email") == who
-            ]
+            if who != "全員":
+                # 個人を選んだら成長ダッシュボード（推移グラフ＋左右2カラム一覧）
+                _render_member_dashboard(who, [r for r in all_records if r.get("user_email") == who])
+                return
+            records = all_records
             st.caption(f"表示中：{len(records)} 件（管理者として全メンバーを閲覧しています）")
 
     if not records:
