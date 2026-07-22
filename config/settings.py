@@ -59,6 +59,8 @@ GOOGLE_OAUTH_SCOPES = [
     "https://www.googleapis.com/auth/userinfo.email",
     "https://www.googleapis.com/auth/userinfo.profile",
     "https://www.googleapis.com/auth/drive.readonly",
+    # 商談予定（Meet）をカレンダーから選ぶために追加。※追加後は一度だけ再ログインが必要。
+    "https://www.googleapis.com/auth/calendar.readonly",
 ]
 
 # --- サービスアカウント / ドメイン全体委任（DWD）---

@@ -256,7 +256,7 @@ def _start_drive_job(creds, file_id: str, user: dict, label: str) -> None:
 def render_evaluate_tab(user: dict) -> None:
     st.markdown("##### 評価する商談を選ぶ")
 
-    options = ["PC からアップロード", "自分のドライブから選択"]
+    options = ["📅 カレンダーの商談から", "自分のドライブから選択", "PC からアップロード"]
     # サービスアカウント設定済みなら、管理者はメンバーのドライブを代理選択できる。
     member_mode = drive_sa.configured() and settings.is_admin(user.get("email"))
     if member_mode:
@@ -275,12 +275,73 @@ def render_evaluate_tab(user: dict) -> None:
             _run_analysis(uploaded, suffix, user, uploaded.name)
     elif source.startswith("メンバー"):
         _render_member_drive_picker(user)
+    elif source.startswith("📅"):
+        creds = session.get_credentials()
+        if not creds:
+            st.info("カレンダー連携には Google ログインが必要です（デモログインでは利用不可）。")
+        else:
+            _render_calendar_picker(creds, user)
     else:
         creds = session.get_credentials()
         if not creds:
             st.info("ドライブ連携には Google ログインが必要です（デモログインでは利用不可）。")
         else:
             _render_drive_picker(creds, user)
+
+
+def _render_calendar_picker(creds, user: dict) -> None:
+    """自分のGoogleカレンダーの商談（Meet）予定から選び、その録画を評価する。"""
+    from services import google_calendar
+
+    only_meet = st.checkbox("Meet（オンライン商談）のみ表示", value=True, key="cal_meet_only")
+    try:
+        events = google_calendar.list_meetings(creds)
+    except Exception as e:  # スコープ不足など
+        msg = str(e)
+        if "insufficient" in msg.lower() or "scope" in msg.lower() or "403" in msg:
+            st.warning(
+                "カレンダー連携がまだ有効ではありません。**一度ログアウト→再ログイン**すると、"
+                "カレンダーの利用許可を求められて有効になります。"
+            )
+            if st.button("🔓 ログアウトして連携し直す", key="cal_relogin"):
+                from auth import persist, session as _sess
+                persist.clear(); _sess.logout(); st.rerun()
+        else:
+            st.error(f"カレンダーの読み込みに失敗しました：{msg[:160]}")
+        return
+
+    if only_meet:
+        events = [e for e in events if e.get("has_meet")]
+    if not events:
+        st.info("直近60日に、対象の商談予定が見つかりませんでした。")
+        return
+
+    def _label(e):
+        d = e.get("start", "").replace("T", " ")[:16]
+        meet = "🟢Meet" if e.get("has_meet") else "　"
+        return f"{d}　{meet}　{e.get('summary','')[:44]}"
+
+    idx = st.selectbox(
+        "商談予定を選ぶ（新しい順）", options=list(range(len(events))),
+        format_func=lambda i: _label(events[i]), key="cal_event",
+    )
+    ev = events[idx]
+
+    with st.spinner("この商談の録画をドライブから探しています…"):
+        rec = google_calendar.find_recording(creds, ev.get("summary", ""), ev.get("start_date", ""))
+
+    if rec:
+        st.success(f"🎥 録画が見つかりました：{rec.get('name','')[:60]}")
+        st.caption(f"作成日：{rec.get('createdTime','')[:10]}")
+        if st.button("AI で評価する", key="cal_eval", use_container_width=True):
+            _start_drive_job(creds, rec["id"], user, ev.get("summary", "")[:60])
+    else:
+        st.warning(
+            "この予定に対応する録画がドライブ内に見つかりませんでした。\n\n"
+            "・会議後、録画が生成されるまで数分〜十数分かかります。\n"
+            "・録画があなたのドライブ（あなたが主催）に保存されている必要があります。\n"
+            "・見つからない場合は「自分のドライブから選択」で直接お選びください。"
+        )
 
 
 def _render_member_drive_picker(user: dict) -> None:
