@@ -805,7 +805,11 @@ def _customer_bubble(text: str, ctype: str) -> None:
 
 
 def _speak(text: str, key: str) -> None:
-    """お客様のセリフをブラウザ内蔵の音声合成で読み上げる（API費用ゼロ）。"""
+    """お客様のセリフを自動再生する（30〜40代女性の音声・API費用ゼロ・ボタン無し）。
+
+    親ウィンドウの音声エンジンを使う。ページを一度でも操作していれば自動再生が通る。
+    ターンが変わるたびに同じ文なら1回だけ話す（重複再生を防ぐ）。
+    """
     import json as _json
 
     import streamlit.components.v1 as st_components
@@ -813,67 +817,44 @@ def _speak(text: str, key: str) -> None:
     payload = _json.dumps(text)
     st_components.html(
         f"""
-        <div style="display:flex;gap:.5rem;align-items:center">
-          <button id="sp{key}" style="cursor:pointer;border:1px solid #6C5CE7;color:#6C5CE7;
-            background:#fff;border-radius:999px;padding:.35rem .9rem;font-size:.85rem">
-            ▶️ お客様のセリフを再生
-          </button>
-          <span id="st{key}" style="font-size:.78rem;color:#8C8794"></span>
-        </div>
         <script>
         (function() {{
           const text = {payload};
-          const btn = document.getElementById("sp{key}");
-          const tag = document.getElementById("st{key}");
-
-          // 30〜40代の女性を想定：日本語の女性音声を優先し、男性音声は除外する
+          const marker = "knote_spoken_{key}";
+          const synth = (window.parent && window.parent.speechSynthesis) || window.speechSynthesis;
           const MALE = ["Otoya", "Ichiro", "Hattori", "Daichi", "Naoki", "Male"];
           function pickVoice() {{
-            let vs = window.speechSynthesis.getVoices()
-              .filter(v => v.lang && v.lang.toLowerCase().indexOf("ja") === 0);
+            let vs = synth.getVoices().filter(v => v.lang && v.lang.toLowerCase().indexOf("ja") === 0);
             if (!vs.length) return null;
             const female = vs.filter(v => !MALE.some(m => (v.name || "").indexOf(m) >= 0));
             if (female.length) vs = female;
-            // 落ち着いた大人の女性に近い順
             const pref = ["Google 日本語", "Kyoko", "O-Ren", "Nanami", "Ayumi", "Haruka", "Sayaka"];
-            for (const p of pref) {{
-              const hit = vs.find(v => v.name && v.name.indexOf(p) >= 0);
-              if (hit) return hit;
-            }}
+            for (const p of pref) {{ const hit = vs.find(v => v.name && v.name.indexOf(p) >= 0); if (hit) return hit; }}
             return vs[0];
           }}
-
           function speak() {{
             try {{
-              window.speechSynthesis.cancel();
-              // 句読点で自然な間ができるよう、文単位に分けて読ませる
-              const chunks = text.split(/(?<=[。！？\\n])/).filter(s => s.trim());
+              // 同じターンで二重に話さない
+              if (window.parent && window.parent[marker]) return;
+              if (window.parent) window.parent[marker] = true;
+              synth.cancel();
               const voice = pickVoice();
-              tag.textContent = "🗣 話しています…";
-              chunks.forEach((c, i) => {{
+              const chunks = text.split(/(?<=[。！？\\n])/).filter(s => s.trim());
+              chunks.forEach(function(c) {{
                 const u = new SpeechSynthesisUtterance(c.trim());
-                u.lang = "ja-JP";
-                // 30〜40代女性の落ち着いた話し方に寄せる：やや低め・やや速め
-                u.rate = 1.08;   // 少し速く（もたつきを解消）
-                u.pitch = 0.88;  // 少し低く（高すぎる声を落ち着かせる）
-                u.volume = 1.0;
+                u.lang = "ja-JP"; u.rate = 1.08; u.pitch = 0.88; u.volume = 1.0;
                 if (voice) u.voice = voice;
-                if (i === chunks.length - 1) u.onend = () => tag.textContent = "";
-                window.speechSynthesis.speak(u);
+                synth.speak(u);
               }});
-            }} catch (e) {{ tag.textContent = "この端末では音声が使えません"; }}
+            }} catch (e) {{}}
           }}
-
-          btn.onclick = speak;
-          // 音声一覧は非同期で読み込まれるため、準備できたら差し替える
-          if (window.speechSynthesis.onvoiceschanged !== undefined) {{
-            window.speechSynthesis.onvoiceschanged = pickVoice;
-          }}
-          // ※自動再生はしない。必ずボタンを押したときだけ再生する。
+          if (synth.getVoices().length) {{ speak(); }}
+          else if (synth.onvoiceschanged !== undefined) {{ synth.onvoiceschanged = speak; setTimeout(speak, 300); }}
+          else {{ setTimeout(speak, 300); }}
         }})();
         </script>
         """,
-        height=48,
+        height=0,
     )
 
 
@@ -984,26 +965,16 @@ def render_roleplay_tab(user: dict) -> None:
         st.divider()
         st.caption(f"ターン {turn + 1} / {len(turns)}")
         _customer_bubble(turns[turn]["customer"], scenario.get("customer_type", "検討済み"))
-        _speak(turns[turn]["customer"], f"{sid}_{turn}")
+        _speak(turns[turn]["customer"], f"{sid}_{turn}")  # お客様のセリフを自動再生
 
-        ready_key = f"rp_ready_{turn}"
-        if not st.session_state.get(ready_key):
-            if st.button("▶ このターンを話す（3秒カウントダウン）", key=f"rp_go_{turn}",
-                         use_container_width=True):
-                ph = st.empty()
-                for n in (3, 2, 1):
-                    ph.markdown(f"<h1 style='text-align:center'>{n}</h1>", unsafe_allow_html=True)
-                    time.sleep(1)
-                ph.markdown("<h3 style='text-align:center'>🎤 どうぞ！</h3>", unsafe_allow_html=True)
-                st.session_state[ready_key] = True
-                st.rerun()
-        else:
-            rec = st.audio_input("マイクを押して話す（1ターン40秒以内が目安）", key=f"rp_rec_{turn}")
-            if rec is not None and st.button("✅ このターンを確定して次へ", key=f"rp_next_{turn}",
-                                             use_container_width=True):
-                audio.append(rec.getvalue())
-                used.append(bool(practice or st.session_state.get(f"rp_hint_{turn}")))
-                st.rerun()
+        # マイクを最初から表示（カウントダウン無し）。録音したら確定して次へ
+        rec = st.audio_input("🎤 マイクを押して、お客様に返答してください（40秒以内が目安）",
+                             key=f"rp_rec_{turn}")
+        if rec is not None and st.button("✅ このターンを確定して次へ", key=f"rp_next_{turn}",
+                                         use_container_width=True):
+            audio.append(rec.getvalue())
+            used.append(bool(practice or st.session_state.get(f"rp_hint_{turn}")))
+            st.rerun()
 
         # --- カンペ（見ずに言えたら次のステップへ）---
         hint = (turns[turn].get("hint") or "").strip()
