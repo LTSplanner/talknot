@@ -805,10 +805,10 @@ def _customer_bubble(text: str, ctype: str) -> None:
 
 
 def _speak(text: str, key: str) -> None:
-    """お客様のセリフを自動再生する（30〜40代女性の音声・API費用ゼロ・ボタン無し）。
+    """お客様のセリフを『ボタンを押したときだけ』読み上げる（自動再生しない）。
 
-    親ウィンドウの音声エンジンを使う。ページを一度でも操作していれば自動再生が通る。
-    ターンが変わるたびに同じ文なら1回だけ話す（重複再生を防ぐ）。
+    タブを開いた瞬間に喋り出さないよう、必ずクリックで再生する。
+    30〜40代女性の音声・API費用ゼロ。
     """
     import json as _json
 
@@ -817,10 +817,13 @@ def _speak(text: str, key: str) -> None:
     payload = _json.dumps(text)
     st_components.html(
         f"""
+        <button id="sp{key}" style="cursor:pointer;border:1px solid #6C5CE7;color:#6C5CE7;
+          background:#fff;border-radius:999px;padding:.4rem 1rem;font-size:.9rem;font-weight:600">
+          ▶️ お客様のセリフを再生
+        </button>
         <script>
         (function() {{
           const text = {payload};
-          const marker = "knote_spoken_{key}";
           const synth = (window.parent && window.parent.speechSynthesis) || window.speechSynthesis;
           const MALE = ["Otoya", "Ichiro", "Hattori", "Daichi", "Naoki", "Male"];
           function pickVoice() {{
@@ -834,9 +837,6 @@ def _speak(text: str, key: str) -> None:
           }}
           function speak() {{
             try {{
-              // 同じターンで二重に話さない
-              if (window.parent && window.parent[marker]) return;
-              if (window.parent) window.parent[marker] = true;
               synth.cancel();
               const voice = pickVoice();
               const chunks = text.split(/(?<=[。！？\\n])/).filter(s => s.trim());
@@ -848,13 +848,13 @@ def _speak(text: str, key: str) -> None:
               }});
             }} catch (e) {{}}
           }}
-          if (synth.getVoices().length) {{ speak(); }}
-          else if (synth.onvoiceschanged !== undefined) {{ synth.onvoiceschanged = speak; setTimeout(speak, 300); }}
-          else {{ setTimeout(speak, 300); }}
+          document.getElementById("sp{key}").onclick = speak;
+          if (synth.onvoiceschanged !== undefined) {{ synth.onvoiceschanged = pickVoice; }}
+          // ※自動再生はしない。必ずボタンを押したときだけ再生する。
         }})();
         </script>
         """,
-        height=0,
+        height=46,
     )
 
 

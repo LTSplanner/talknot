@@ -1,0 +1,38 @@
+name: daily-minutes
+
+# 商談議事録のナレッジを毎日自動で取り込む（無料枠の範囲まで処理→翌日続き）。
+# 必要な GitHub Secrets:
+#   KNOWLEDGE_SA_JSON   … 知識SAの鍵JSON（1行 or 複数行そのまま）
+#   KNOWLEDGE_SHEET_ID  … 共有シートのID
+#   GEMINI_API_KEY      … Gemini APIキー
+
+on:
+  schedule:
+    - cron: "0 9 * * *"    # 毎日 09:00 UTC（＝18:00 JST、無料枠リセット後）
+  workflow_dispatch:        # 手動実行も可
+
+# 同時に走らせない（前回が長引いても二重処理しない）
+concurrency:
+  group: daily-minutes
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Update meeting-minutes knowledge
+        env:
+          KNOWLEDGE_SA_JSON: ${{ secrets.KNOWLEDGE_SA_JSON }}
+          KNOWLEDGE_SHEET_ID: ${{ secrets.KNOWLEDGE_SHEET_ID }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: python scripts/daily_meeting_update.py
