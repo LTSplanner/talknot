@@ -28,15 +28,23 @@ SCRIPT_BOOKS = [
 ]
 SUBJECT = "planner@life-time-support.com"
 
-# タブ名からカテゴリ（プルダウンの大分類）を決める
-GROUPS = [
-    ("コーティング", ["コーティング", "ガラス説明", "UV説明", "シリコン説明", "セラミック説明", "整い版"]),
-    ("エコカラット", ["エコカラット", "エコLD"]),
-    ("エアコン", ["エアコン"]),
-    ("収納・家具", ["食器棚", "吊戸棚", "可変棚", "小物", "ピクチャーレール", "マジキャビ"]),
-    ("住設・その他商材", ["住設", "食洗機", "窓フィルム", "ミラーフィルム", "カーテン"]),
-    ("商談の流れ", ["導入", "会社説明", "内覧会", "締め", "スケジュール", "引っ越し"]),
+# 対象カテゴリは4つに限定（重点3商材＋導入）。他商材は将来実装のため今は生成しない。
+# 判定はこの順で行う（コーティング等を先に判定し、汎用の「導入」は最後に拾う）。
+CATEGORIES = [
+    ("コーティング", ["コーティング", "ガラス説明", "ＵＶ説明", "UV説明", "シリコン説明",
+                     "セラミック説明", "整い", "水回りコーティング", "水廻り", "フロアコーティング"]),
+    ("エコカラット", ["エコカラット", "エコＬＤ", "エコLD"]),
+    ("ダウンライト", ["ダウンライト", "人感センサー", "照明"]),
+    ("導入", ["導入", "会社説明", "内覧会", "締め", "スケジュール", "引っ越し", "引越",
+             "検討内容", "商談の流れ"]),
 ]
+
+
+def _category_of(tab: str) -> str | None:
+    for name, keys in CATEGORIES:
+        if any(k in tab for k in keys):
+            return name
+    return None  # 4カテゴリ外（エアコン・家具・住設等）は対象外
 
 FOLLOW_UPS = [
     "なるほど。もう少し詳しく教えてもらえますか？",
@@ -44,13 +52,6 @@ FOLLOW_UPS = [
     "他の選択肢と比べると、どう違いますか？",
     "費用面や期間はどうなりますか？",
 ]
-
-
-def _group_of(tab: str) -> str:
-    for name, keys in GROUPS:
-        if any(k in tab for k in keys):
-            return name
-    return "その他"
 
 
 def _opening_line(tab: str) -> str:
@@ -156,75 +157,109 @@ def _tabs(sheet_id: str, token: str) -> list[tuple[str, str]]:
     return out
 
 
+def _downlight_units(items: list[dict]) -> list[tuple[str, str]]:
+    """住設タブから、ダウンライト/照明/人感センサーの範囲を切り出して単元化する。
+
+    ダウンライト専用タブが無いため、住設の「人感センサー」〜「壁掛け」手前を抜き出す。
+    住設タブはほぼ全セルが色付きで見出し判定が過剰なため、【】は一旦解除して整える。
+    """
+    body = next((i.get("body", "") for i in items if i.get("tab") == "住設"), "")
+    if not body:
+        return []
+    m = re.search(r"【?人感センサー】?", body)
+    if not m:
+        return []
+    seg = body[m.start():]
+    end = re.search(r"【?壁掛け】?", seg)
+    if end:
+        seg = seg[: end.start()]
+    seg = seg.replace("【", "").replace("】", "").strip()
+    seg = re.sub(r"\n{2,}", "\n", seg)
+    return [("ダウンライト・人感センサー照明", "【ダウンライト・人感センサー・照明】\n" + seg)]
+
+
+def _build_turns(tab: str, parts: list, ctype: str) -> list[dict]:
+    turns = []
+    for i, (title, chunk) in enumerate(parts):
+        if i == 0:
+            customer = _opening_line(tab)  # 第一声は render 時にペルソナで属性別に差し替わる
+        elif title and title != "導入部":
+            customer = f"（{title}について）もう少し教えてもらえますか？"
+        else:
+            customer = FOLLOW_UPS[(i - 1) % len(FOLLOW_UPS)]
+        turns.append({"customer": customer, "hint": chunk, "section": title})
+    return turns
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--max-turns", type=int, default=4)
+    ap.add_argument("--max-turns", type=int, default=5)
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 
-    # 取り込み済みの模範トークスクリプト（単元別・見出し付き）を情報源にする
-    source = [(i.get("tab", ""), i.get("body", "")) for i in storage.get_talk_script_items()]
+    items = storage.get_talk_script_items()
+    source = [(i.get("tab", ""), i.get("body", "")) for i in items]
     if not source:
         sys.exit("模範トークスクリプトが未登録です。先に import_talk_scripts.py を実行してください。")
-    # 手書きの総合シナリオを先頭に（グループ名を付ける）
+
+    # 4カテゴリに該当するタブだけを単元にする（＋ダウンライトは住設から抽出）
+    units: list[tuple[str, str, str]] = []  # (category, title, body)
+    seen_titles = set()
+    for tab, body in source:
+        cat = _category_of(tab)
+        if cat is None or not body.strip():
+            continue
+        key = (cat, tab)
+        if key in seen_titles:
+            continue
+        seen_titles.add(key)
+        units.append((cat, tab, body))
+    for title, body in _downlight_units(items):
+        units.append(("ダウンライト", title, body))
+
+    # 各単元について、お客様タイプ2種（検討済み／未検討）を生成する
     scenarios: list[dict] = []
-    for s in storage._DEFAULT_SCENARIOS:
-        s = dict(s)
-        s["group"] = "総合商談"
-        s.setdefault("customer_type", "検討済み")
-        s.setdefault("level", 1)
-        s.setdefault("focus", TRUST_FOCUS if s.get("id") == "first_meeting" else DECIDED_FOCUS)
-        scenarios.append(s)
+    used_ids = set()
+    for cat, tab, body in units:
+        parts = _sections(body, args.max_turns)
+        if not parts:
+            continue
+        base = re.sub(r"[^0-9A-Za-zぁ-んァ-ン一-龥]+", "_", tab).strip("_")[:36] or "unit"
+        # 表示タイトルは先頭の「未」（未商談用の意味）を外す（属性は別プルダウンで選ぶため）
+        title = re.sub(r"^未", "", tab).strip()
+        for ctype in ("検討済み", "未検討"):
+            sid = f"{base}_{'d' if ctype == '検討済み' else 'u'}"
+            while sid in used_ids:
+                sid += "_x"
+            used_ids.add(sid)
+            focus = [UNDECIDED_FOCUS if ctype == "未検討" else DECIDED_FOCUS]
+            if cat == "導入":
+                focus.append(TRUST_FOCUS)
+            scenarios.append({
+                "id": sid, "group": cat, "title": title,
+                "customer_type": ctype, "level": 2 if ctype == "未検討" else 1,
+                "focus": "\n\n".join(focus),
+                "turns": _build_turns(tab, parts, ctype),
+            })
 
-    seen = {s["id"] for s in scenarios}
-    if True:
-        for tab, body in source:
-            parts = _sections(body, args.max_turns)
-            if not parts:
-                continue
-            sid = re.sub(r"[^0-9A-Za-zぁ-んァ-ン一-龥]+", "_", tab).strip("_")[:40] or f"t{len(seen)}"
-            base = sid
-            n = 2
-            while sid in seen:
-                sid = f"{base}_{n}"
-                n += 1
-            seen.add(sid)
-            turns = []
-            for i, (title, chunk) in enumerate(parts):
-                if i == 0:
-                    customer = _opening_line(tab)
-                elif title and title != "導入部":
-                    customer = f"（{title}について）もう少し教えてもらえますか？"
-                else:
-                    customer = FOLLOW_UPS[(i - 1) % len(FOLLOW_UPS)]
-                turns.append({"customer": customer, "hint": chunk, "section": title})
-            ctype, level = _customer_type(tab)
-            entry = {"id": sid, "group": _group_of(tab), "title": tab, "turns": turns,
-                     "customer_type": ctype, "level": level}
-            focus_parts = [UNDECIDED_FOCUS if ctype == "未検討" else DECIDED_FOCUS]
-            if any(k in tab for k in TRUST_KEYS):
-                focus_parts.append(TRUST_FOCUS)
-            entry["focus"] = "\n\n".join(focus_parts)
-            scenarios.append(entry)
+    # カテゴリの表示順を固定
+    order = {"導入": 0, "コーティング": 1, "エコカラット": 2, "ダウンライト": 3}
+    scenarios.sort(key=lambda s: (order.get(s["group"], 9), s["title"], s["customer_type"]))
 
-    by_group: dict[str, int] = {}
-    for s in scenarios:
-        by_group[s.get("group", "その他")] = by_group.get(s.get("group", "その他"), 0) + 1
-    print(f"生成シナリオ: {len(scenarios)} 単元")
-    for g, n in by_group.items():
-        print(f"  ■ {g}: {n} 単元")
+    from collections import Counter
+    by_cat = Counter(s["group"] for s in scenarios)
+    print(f"生成シナリオ: {len(scenarios)} 件（4カテゴリ × 2タイプ）")
+    for c in ["導入", "コーティング", "エコカラット", "ダウンライト"]:
+        titles = sorted({s["title"] for s in scenarios if s["group"] == c})
+        print(f"  ■ {c}: {by_cat.get(c,0)}件 / 単元 {len(titles)}: {'、'.join(titles)}")
 
     if args.dry_run:
         print("--dry-run のため保存しません。")
-        for s in scenarios[3:6]:
-            print(f"\n--- {s['group']} / {s['title']} ---")
-            for t in s["turns"][:2]:
-                print("  🧑", t["customer"])
-                print("  📋", t["hint"][:100].replace("\n", " "), "…")
         return
 
+    # リセット→再構築（既存シナリオを置き換える）
     storage.set_scenarios(scenarios)
-    print(f"💾 保存しました（読み戻し {len(storage.get_scenarios())} 単元）")
+    print(f"💾 保存しました（読み戻し {len(storage.get_scenarios())} 件）")
 
 
 if __name__ == "__main__":

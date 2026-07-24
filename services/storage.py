@@ -761,24 +761,43 @@ def get_scenario(scenario_id: str) -> dict | None:
     return next((s for s in get_scenarios() if s.get("id") == scenario_id), None)
 
 
+# 検討済みのお客様が、その商材を具体的に検討している体の第一声（カテゴリ一致を保証）。
+_DECIDED_OPENING = {
+    "コーティング": "コーティングを検討していて、見積もりももらったんですが、種類の違いを教えてもらえますか？",
+    "エコカラット": "エコカラットを検討していて、いくつか見積もりも取っているんですが、特徴を教えてもらえますか？",
+    "ダウンライト": "ダウンライトや照明の変更を検討しているんですが、どんなことができるか教えてもらえますか？",
+}
+
+
 def persona_flavored_turns(scenario: dict) -> list[dict]:
     """台本のターンに、議事録由来のお客様ペルソナの“生の言い回し”を混ぜて返す。
 
-    決定的（同じ単元なら毎回同じ）なので、画面表示と評価で結果が一致する。
-    ペルソナ未生成なら通常の台本をそのまま返す。
+    - 決定的（同じ単元なら毎回同じ）なので、画面表示と評価で結果が一致する。
+    - 検討済み×商材カテゴリは、そのカテゴリに合った具体的な第一声にする（不一致を防ぐ）。
+    - 未検討・導入は、受け身/汎用のペルソナ第一声を使う。
     """
     turns = scenario_turns(scenario)
-    persona = get_customer_persona()
-    ctype = "undecided" if scenario.get("customer_type") == "未検討" else "decided"
-    p = persona.get(ctype, {}) if isinstance(persona, dict) else {}
-    openings = [o for o in (p.get("opening") or []) if o]
-    if not turns or not openings:
+    if not turns:
         return turns
-    # 単元IDから決定的に第一声を選ぶ（ランダムに見えて毎回同じ）
-    seed = sum(ord(c) for c in scenario.get("id", "")) % len(openings)
+    persona = get_customer_persona()
+    cat = scenario.get("group", "")
+    undecided = scenario.get("customer_type") == "未検討"
+
+    line = None
+    if not undecided and cat in _DECIDED_OPENING:
+        line = _DECIDED_OPENING[cat]
+    else:
+        key = "undecided" if undecided else "decided"
+        p = persona.get(key, {}) if isinstance(persona, dict) else {}
+        openings = [o for o in (p.get("opening") or []) if o]
+        if openings:
+            seed = sum(ord(c) for c in scenario.get("id", "")) % len(openings)
+            line = openings[seed]
+    if not line:
+        return turns
     turns = [dict(t) for t in turns]
     turns[0] = dict(turns[0])
-    turns[0]["customer"] = openings[seed]
+    turns[0]["customer"] = line
     return turns
 
 

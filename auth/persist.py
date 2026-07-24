@@ -1,19 +1,19 @@
 """ログイン状態をブラウザの暗号化Cookieに保持し、再訪時の再ログインを省く。
 
-設計上の要点（毎回ログインを要求されていた原因への対処）:
-- **読み取りは `st.context.cookies`**（サーバー側で同期的に読める）。
-  カスタムコンポーネント方式は「初回の実行では値が返らない」ため、
-  ログイン判定の時点では常に空になり、毎回ログイン画面に戻っていた。
-- **保存する中身は最小限**（表示名・メール・refresh_token のみ）。
-  Cookie には約4KBの上限があり、認証情報を丸ごと入れると保存自体が失敗する。
-  他の値は settings から再構成できるため保持しない。
-- 暗号鍵は既存の秘密情報（GOOGLE_CLIENT_SECRET）から内部生成する（新しい秘密は不要）。
-- すべて try/except で囲み、Cookie や暗号で失敗しても **アプリは絶対に落とさない**
-  （その場合は通常のログインにフォールバックする）。
+方式（毎回ログインを要求される問題への最終対処）:
+- **保存（書き込み）は extra-streamlit-components の CookieManager**。
+  素のJSでの document.cookie 書き込みはコンポーネントのiframe制約で不発になりうるため、
+  専用コンポーネントで確実に書く。
+- **読み取りは `st.context.cookies`**（サーバー側で同期取得。初回表示でチラつかない）。
+  CookieManager 側の get は「初回runでNoneが返る」ため使わない。
+- 保存内容は最小限（表示名・メール・refresh_token・access_token）。Cookie 4KB上限に収める。
+- 暗号鍵は既存の秘密情報（GOOGLE_CLIENT_SECRET）から内部生成する。
+- すべて try/except で囲み、失敗しても **アプリは絶対に落とさない**（通常ログインに倒す）。
 """
 from __future__ import annotations
 
 import base64
+import datetime as _dt
 import hashlib
 import json
 import urllib.parse
@@ -38,7 +38,6 @@ def _fernet():
 
 
 def available() -> bool:
-    """ログイン保持が使える状態か（暗号が初期化できるか）。"""
     try:
         _fernet()
         return True
@@ -46,11 +45,15 @@ def available() -> bool:
         return False
 
 
-def _run_js(script: str) -> None:
-    """親ドキュメントに対して小さなJSを実行する（高さ0の不可視コンポーネント）。"""
-    import streamlit.components.v1 as _c
+def _manager():
+    """CookieManager を1実行で使い回す（書き込み専用に使う）。"""
+    cm = st.session_state.get("_knote_cookie_mgr")
+    if cm is None:
+        import extra_streamlit_components as stx
 
-    _c.html(f"<script>try{{{script}}}catch(e){{}}</script>", height=0)
+        cm = stx.CookieManager(key="knote_cookie_mgr")
+        st.session_state["_knote_cookie_mgr"] = cm
+    return cm
 
 
 def save(user: dict, creds: dict | None) -> None:
@@ -59,16 +62,13 @@ def save(user: dict, creds: dict | None) -> None:
         payload = {
             "u": {"name": user.get("name", ""), "email": user.get("email", "")},
             "r": (creds or {}).get("refresh_token") or "",
-            "t": (creds or {}).get("token") or "",   # 直近の再訪ではこれで即ドライブ連携
+            "t": (creds or {}).get("token") or "",
         }
-        token = _fernet().encrypt(
-            json.dumps(payload, ensure_ascii=False).encode()
-        ).decode()
-        _run_js(
-            f"const v={json.dumps(token)};"
-            "const s=(location.protocol==='https:')?';Secure':'';"
-            f"window.parent.document.cookie='{_COOKIE}='+encodeURIComponent(v)"
-            f"+';path=/;max-age={_TTL_DAYS * 86400};SameSite=Lax'+s;"
+        token = _fernet().encrypt(json.dumps(payload, ensure_ascii=False).encode()).decode()
+        _manager().set(
+            _COOKIE, token,
+            expires_at=_dt.datetime.now() + _dt.timedelta(days=_TTL_DAYS),
+            key="knote_cookie_set",
         )
     except Exception:
         pass
@@ -88,7 +88,6 @@ def load() -> dict | None:
             return None
         creds = None
         if data.get("r") or data.get("t"):
-            # 認証情報は refresh_token と設定値から組み直す（Cookieを小さく保つため）
             creds = {
                 "token": data.get("t") or None,
                 "refresh_token": data.get("r") or None,
@@ -105,9 +104,6 @@ def load() -> dict | None:
 def clear() -> None:
     """保存したログインCookieを消す（ログアウト時）。"""
     try:
-        _run_js(
-            "const s=(location.protocol==='https:')?';Secure':'';"
-            f"window.parent.document.cookie='{_COOKIE}=;path=/;max-age=0;SameSite=Lax'+s;"
-        )
+        _manager().delete(_COOKIE, key="knote_cookie_del")
     except Exception:
         pass
