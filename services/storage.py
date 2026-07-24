@@ -35,6 +35,8 @@ _DOC_KINDS = {
     "scenarios": ("roleplay_scenarios.json", "RoleplayScenarios"),
     # 議事録から作ったお客様ペルソナ（属性別の反応・不安・口ぐせ・断り文句）
     "persona": ("customer_persona.json", "CustomerPersona"),
+    # ロープレの「進め方の切り口」コーチング（カテゴリ×属性別）
+    "coaching": ("coaching_tips.json", "CoachingTips"),
 }
 _KNOWLEDGE_DOC_BUDGET = 60000   # base 上限
 _FAQ_DOC_BUDGET = 45000         # faq 上限
@@ -813,11 +815,22 @@ def persona_flavored_turns(scenario: dict) -> list[dict]:
         if openings:
             seed = sum(ord(c) for c in scenario.get("id", "")) % len(openings)
             line = openings[seed]
-    if not line:
-        return turns
     turns = [dict(t) for t in turns]
-    turns[0] = dict(turns[0])
-    turns[0]["customer"] = line
+    if line:
+        turns[0] = dict(turns[0])
+        turns[0]["customer"] = line
+
+    # カンペ冒頭に「進め方の切り口」コーチングを差し込む（潜在ニーズを掘る導線を示す）
+    tips = get_coaching_tips()
+    key = f"{cat}|{'未検討' if undecided else '検討済み'}"
+    tip = (tips.get(key) or tips.get(cat) or "").strip()
+    if tip:
+        turns[0] = dict(turns[0])
+        base_hint = turns[0].get("hint", "")
+        turns[0]["hint"] = (
+            "💡 進め方の切り口（AIコーチ）\n" + tip
+            + "\n\n──────── 模範トーク ────────\n" + base_hint
+        )
     return turns
 
 
@@ -831,6 +844,21 @@ def set_customer_persona(persona: dict) -> None:
 
 def get_customer_persona() -> dict:
     raw = _load_knowledge_doc("persona").strip()
+    if not raw:
+        return {}
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+
+
+def set_coaching_tips(tips: dict) -> None:
+    """ロープレの『進め方の切り口』コーチング（キー="カテゴリ|属性"）を保存。"""
+    set_knowledge_doc(json.dumps(tips, ensure_ascii=False), kind="coaching")
+
+
+def get_coaching_tips() -> dict:
+    raw = _load_knowledge_doc("coaching").strip()
     if not raw:
         return {}
     try:
