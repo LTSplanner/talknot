@@ -46,6 +46,28 @@ def _category_of(tab: str) -> str | None:
             return name
     return None  # 4カテゴリ外（エアコン・家具・住設等）は対象外
 
+
+# ロープレ単元から除外するタブ（重複・統合版のため個別単元にしない）。先頭「未」除去後の名前で判定。
+UNIT_EXCLUDE = {"整い版", "コーティング"}
+
+# カテゴリ内の単元の並び順（キーワードで先頭一致を判定。未該当は末尾）。
+CATEGORY_UNIT_ORDER = {
+    "コーティング": [
+        "フロアコーティングを行った", "種類を話す前の導入", "ガラス", "ＵＶ", "UV",
+        "シリコン", "セラミック", "水回り", "水廻り", "特典", "決まった後",
+    ],
+}
+
+
+def _unit_rank(cat: str, title: str) -> tuple:
+    keys = CATEGORY_UNIT_ORDER.get(cat)
+    if keys:
+        for i, k in enumerate(keys):
+            if k in title:
+                return (i, "")
+        return (len(keys), title)
+    return (0, title)
+
 FOLLOW_UPS = [
     "なるほど。もう少し詳しく教えてもらえますか？",
     "それだと、どんなメリットがあるんでしょうか。",
@@ -209,6 +231,8 @@ def main() -> None:
         cat = storage.script_category(tab)  # 編集画面と同じ分類（唯一の正）
         if cat == "その他" or not body.strip():
             continue
+        if re.sub(r"^未", "", tab).strip() in UNIT_EXCLUDE:  # 整い版・コーティング(統合版)は除外
+            continue
         key = (cat, tab)
         if key in seen_titles:
             continue
@@ -242,9 +266,10 @@ def main() -> None:
                 "turns": _build_turns(tab, parts, ctype),
             })
 
-    # カテゴリの表示順を固定
+    # カテゴリの表示順を固定し、カテゴリ内は指定の単元順に並べる
     order = {"導入": 0, "コーティング": 1, "エコカラット": 2, "ダウンライト": 3}
-    scenarios.sort(key=lambda s: (order.get(s["group"], 9), s["title"], s["customer_type"]))
+    scenarios.sort(key=lambda s: (order.get(s["group"], 9),
+                                  _unit_rank(s["group"], s["title"]), s["customer_type"]))
 
     from collections import Counter
     by_cat = Counter(s["group"] for s in scenarios)
