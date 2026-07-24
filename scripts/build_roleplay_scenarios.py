@@ -206,8 +206,8 @@ def main() -> None:
     units: list[tuple[str, str, str]] = []  # (category, title, body)
     seen_titles = set()
     for tab, body in source:
-        cat = _category_of(tab)
-        if cat is None or not body.strip():
+        cat = storage.script_category(tab)  # 編集画面と同じ分類（唯一の正）
+        if cat == "その他" or not body.strip():
             continue
         key = (cat, tab)
         if key in seen_titles:

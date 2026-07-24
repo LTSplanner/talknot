@@ -935,23 +935,31 @@ def render_roleplay_tab(user: dict) -> None:
     scenarios = storage.get_scenarios()
     locked = bool(st.session_state.get("rp_audio"))
 
-    # お客様の属性で段階的に練習する（検討済み → 未検討 の順に難しくなる）
-    types = ["すべて"] + sorted({s.get("customer_type", "検討済み") for s in scenarios})
+    # お客様の属性で段階的に練習する（検討済み → 未検討 の2択。単元の重複を防ぐ）
+    types = [t for t in ["検討済み", "未検討"]
+             if any(s.get("customer_type") == t for s in scenarios)]
     ccol, gcol, scol = st.columns([1, 1, 2])
     with ccol:
         ctype = st.selectbox("お客様タイプ", types, key="rp_ctype", disabled=locked)
-    pool = [s for s in scenarios
-            if ctype == "すべて" or s.get("customer_type", "検討済み") == ctype]
+    pool = [s for s in scenarios if s.get("customer_type", "検討済み") == ctype]
+    # カテゴリは固定順で表示
     groups: dict[str, list[dict]] = {}
-    for s in pool:
-        groups.setdefault(s.get("group", "総合"), []).append(s)
+    for cat in storage.SCRIPT_CATEGORY_ORDER:
+        g = [s for s in pool if s.get("group") == cat]
+        if g:
+            groups[cat] = g
     if not groups:
         st.info("この条件に合う単元がありません。")
         return
     with gcol:
         group = st.selectbox("カテゴリ", list(groups), key="rp_group", disabled=locked)
     with scol:
-        items = groups[group]
+        # 同名単元が複数あっても1つに（タイプで既に絞れているので通常は一意）
+        items, seen_t = [], set()
+        for s in groups[group]:
+            if s.get("title") not in seen_t:
+                seen_t.add(s.get("title"))
+                items.append(s)
         titles = {s["id"]: s.get("title", s["id"]) for s in items}
         sid = st.selectbox("単元を選ぶ", options=list(titles),
                            format_func=lambda i: titles[i], key="rp_scenario", disabled=locked)
@@ -1057,15 +1065,18 @@ def _render_script_admin() -> None:
             f"登録済み：**{len(items)} 単元 / 合計 {total:,} 文字**（元スプレッドシートのタブ単位）。"
             "ロープレ評価の🎯模範トーク視点は、この型の再現度で採点されます。"
         )
-        # 単元ごとに中身をチェック・修正できる
-        books = sorted({i.get("book", "") for i in items})
-        bcol, tcol = st.columns([1, 2])
-        with bcol:
-            book = st.selectbox("ブック", books, key="rp_sc_book")
+        # ロープレと同じカテゴリで単元を選ぶ（導入/コーティング/エコカラット/ダウンライト/その他）
+        cats = [c for c in storage.SCRIPT_CATEGORY_ORDER
+                if any(storage.script_category(i["tab"]) == c for i in items)]
+        ccol, tcol = st.columns([1, 2])
+        with ccol:
+            cat = st.selectbox("カテゴリ", cats, key="rp_sc_cat")
         with tcol:
-            tabs = [i["tab"] for i in items if i.get("book") == book]
-            tab = st.selectbox("単元（タブ）", tabs, key="rp_sc_tab")
-        target = next((i for i in items if i.get("book") == book and i.get("tab") == tab), None)
+            tabs = sorted({i["tab"] for i in items if storage.script_category(i["tab"]) == cat})
+            tab = st.selectbox("単元（タブ）", tabs, key="rp_sc_tab") if tabs else None
+        if cat == "その他":
+            st.caption("※ダウンライトのロープレは、この中の「住設」タブ内（照明・人感センサー）から自動生成しています。")
+        target = next((i for i in items if i.get("tab") == tab), None) if tab else None
         if target:
             body = st.text_area(f"「{tab}」の内容（{len(target.get('body','')):,}字）",
                                 value=target.get("body", ""), height=320, key=f"rp_sc_body_{tab}")

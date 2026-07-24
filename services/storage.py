@@ -667,6 +667,26 @@ def scenario_turns(scenario: dict) -> list[dict]:
 _SCRIPT_ITEMS_NAME = "talk_scripts.json"
 _SCRIPT_DOC_HEADER = "===== 模範トークスクリプト（社内標準） ====="
 
+# 単元（タブ）をロープレのカテゴリに分類する（編集画面・シナリオ生成で共通利用）。
+# 判定はこの順（商材を先に、汎用の「導入」は最後）。4カテゴリ外は「その他」。
+SCRIPT_CATEGORY_ORDER = ["導入", "コーティング", "エコカラット", "ダウンライト", "その他"]
+_SCRIPT_CATEGORY_KEYS = [
+    ("コーティング", ["コーティング", "ガラス説明", "ＵＶ説明", "UV説明", "シリコン説明",
+                     "セラミック説明", "整い", "水回りコーティング", "水廻り", "フロアコーティング"]),
+    ("エコカラット", ["エコカラット", "エコＬＤ", "エコLD"]),
+    ("ダウンライト", ["ダウンライト", "人感センサー", "照明"]),
+    ("導入", ["導入", "会社説明", "内覧会", "締め", "スケジュール", "引っ越し", "引越",
+             "検討内容", "商談の流れ"]),
+]
+
+
+def script_category(tab: str) -> str:
+    """単元名からロープレのカテゴリを返す（4カテゴリ or その他）。"""
+    for name, keys in _SCRIPT_CATEGORY_KEYS:
+        if any(k in (tab or "") for k in keys):
+            return name
+    return "その他"
+
 
 def get_talk_script_items() -> list[dict]:
     """模範トークスクリプトを『単元（元スプシのタブ）ごと』に返す。
