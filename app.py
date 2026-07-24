@@ -109,7 +109,7 @@ def resolve_user() -> dict | None:
 
 
 def render_login() -> None:
-    components.hero(subtitle="お話が楽しくなる。お客様との絆が、結ばれる。")
+    components.hero()
 
     if err := st.session_state.pop("login_error", None):
         st.error(err)

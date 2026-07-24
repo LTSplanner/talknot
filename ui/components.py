@@ -208,7 +208,6 @@ def sidebar(user: dict) -> None:
                     f'{KNOT_MARK.format(size=22)}'
                     '<span class="notranslate" translate="no" style="font-weight:700;font-size:1.25rem;letter-spacing:-.03em">KNOTE</span></div>',
                     unsafe_allow_html=True)
-        st.caption("お話が楽しくなる。お客様との絆が、結ばれる。")
         st.divider()
         st.markdown(f"**{user.get('name', 'ゲスト')}**")
         st.caption(user.get("email", ""))
