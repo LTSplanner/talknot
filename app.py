@@ -56,10 +56,15 @@ def _declare_japanese_page() -> None:
     """
     import streamlit.components.v1 as _c
 
+    # lang=ja だけでは「手動翻訳」を止められず、Google翻訳がDOMを書き換えると
+    # React が removeChild で落ちる（有名な衝突）。notranslate と meta を明示して
+    # 翻訳対象から完全に外す。
     _c.html(
-        "<script>try{const d=window.parent.document;"
-        "d.documentElement.lang='ja';"
-        "d.documentElement.setAttribute('translate','no');"
+        "<script>try{const d=window.parent.document;const h=d.documentElement;"
+        "h.lang='ja';h.setAttribute('translate','no');h.classList.add('notranslate');"
+        "if(!d.querySelector('meta[name=\"google\"]')){"
+        "var m=d.createElement('meta');m.name='google';m.content='notranslate';"
+        "(d.head||h).appendChild(m);}"
         "}catch(e){}</script>",
         height=0,
     )
