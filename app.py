@@ -752,21 +752,21 @@ def render_history_tab(user: dict) -> None:
     st.markdown("##### 評価履歴")
 
     is_admin = settings.is_admin(user.get("email"))
-    records = storage.list_evaluations(user["email"])
 
     if is_admin:
-        show_all = st.toggle("🛡️ 全メンバーの履歴を見る（管理者）", value=False, key="hist_all")
-        if show_all:
-            all_records = storage.list_all_evaluations()
-            _render_practice_overview(all_records)
-            members = ["全員"] + sorted({r.get("user_email", "") for r in all_records if r.get("user_email")})
-            who = st.selectbox("メンバーで絞り込み", members, key="hist_member")
-            if who != "全員":
-                # 個人を選んだら成長ダッシュボード（推移グラフ＋左右2カラム一覧）
-                _render_member_dashboard(who, [r for r in all_records if r.get("user_email") == who])
-                return
-            records = all_records
-            st.caption(f"表示中：{len(records)} 件（管理者として全メンバーを閲覧しています）")
+        # 管理者は切り替え不要で、常に「自分＋全メンバー」を閲覧できる。
+        all_records = storage.list_all_evaluations()
+        _render_practice_overview(all_records)
+        members = ["全員"] + sorted({r.get("user_email", "") for r in all_records if r.get("user_email")})
+        who = st.selectbox("メンバーで絞り込み（既定：全員を表示）", members, key="hist_member")
+        if who != "全員":
+            # 個人を選んだら成長ダッシュボード（推移グラフ＋左右2カラム一覧）
+            _render_member_dashboard(who, [r for r in all_records if r.get("user_email") == who])
+            return
+        records = all_records
+        st.caption(f"表示中：{len(records)} 件（自分＋全メンバー／管理者として閲覧中）")
+    else:
+        records = storage.list_evaluations(user["email"])
 
     if not records:
         st.caption("まだ評価履歴がありません。")
