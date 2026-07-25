@@ -1010,9 +1010,16 @@ def render_roleplay_tab(user: dict) -> None:
     with ccol:
         ctype = st.selectbox("お客様タイプ", types, key="rp_ctype", disabled=locked)
     pool = [s for s in scenarios if s.get("customer_type", "検討済み") == ctype]
-    # カテゴリは固定順で表示
+    # カテゴリは固定順で表示。応用①「反論対応」は feature flag で制御し、
+    # フラグOFF＆非管理者には出さない（管理者はOFFでもプレビュー可）。
+    obj_visible = settings.feature_visible("objection_drill", user.get("email"))
+    cat_order = list(storage.SCRIPT_CATEGORY_ORDER)
+    if obj_visible and "反論対応" not in cat_order:
+        # 基礎（4カテゴリ）の後・「その他」の手前に差し込む
+        idx = cat_order.index("その他") if "その他" in cat_order else len(cat_order)
+        cat_order.insert(idx, "反論対応")
     groups: dict[str, list[dict]] = {}
-    for cat in storage.SCRIPT_CATEGORY_ORDER:
+    for cat in cat_order:
         g = [s for s in pool if s.get("group") == cat]
         if g:
             groups[cat] = g
@@ -1021,6 +1028,9 @@ def render_roleplay_tab(user: dict) -> None:
         return
     with gcol:
         group = st.selectbox("カテゴリ", list(groups), key="rp_group", disabled=locked)
+    # 管理者プレビュー時（フラグOFFなのに反論対応が見えている）は準備中と分かるよう注記
+    if group == "反論対応" and not settings.feature_enabled("objection_drill"):
+        st.caption("🧪 準備中（管理者のみ表示）— 基礎習得後にプランナーへ開放予定の応用ドリルです。")
     with scol:
         # 同名単元が複数あっても1つに（タイプで既に絞れているので通常は一意）
         items, seen_t = [], set()

@@ -31,6 +31,28 @@ class TestAccessControl:
         assert not settings.is_admin(None)
 
 
+@pytest.mark.usefixtures("domains")
+class TestFeatureFlags:
+    def test_flag_default_off(self, monkeypatch):
+        monkeypatch.setattr(settings, "_FEATURE_FLAGS", {"objection_drill": False})
+        assert settings.feature_enabled("objection_drill") is False
+
+    def test_unknown_flag_is_false(self):
+        assert settings.feature_enabled("no_such_feature") is False
+
+    def test_visible_to_admin_when_off(self, monkeypatch):
+        monkeypatch.setattr(settings, "_FEATURE_FLAGS", {"objection_drill": False})
+        # フラグOFFでも管理者にはプレビューとして見せる
+        assert settings.feature_visible("objection_drill", "planner@life-time-support.com")
+        # フラグOFF＆非管理者には見せない
+        assert not settings.feature_visible("objection_drill", "other@life-time-support.com")
+
+    def test_visible_to_everyone_when_on(self, monkeypatch):
+        monkeypatch.setattr(settings, "_FEATURE_FLAGS", {"objection_drill": True})
+        assert settings.feature_enabled("objection_drill") is True
+        assert settings.feature_visible("objection_drill", "other@life-time-support.com")
+
+
 def test_criteria_are_five_and_unique_keys():
     assert len(settings.EVALUATION_CRITERIA) == 5
     keys = [c.key for c in settings.EVALUATION_CRITERIA]

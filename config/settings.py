@@ -31,6 +31,14 @@ def _csv_env(key: str, default: str = "") -> list[str]:
     return [v.strip() for v in os.getenv(key, default).split(",") if v.strip()]
 
 
+def _bool_env(key: str, default: bool = False) -> bool:
+    """環境変数を bool として読む（"1/true/yes/on" を True とみなす）。"""
+    val = os.getenv(key)
+    if val is None:
+        return default
+    return val.strip().lower() in {"1", "true", "yes", "on"}
+
+
 # --- アクセス制御 ---
 # ログインを許可する組織ドメイン。本番では .env で自社ドメインに変更する。
 ALLOWED_DOMAINS = _csv_env("ALLOWED_DOMAINS", "yourcompany.com")
@@ -162,6 +170,31 @@ def is_allowed_domain(email: str | None) -> bool:
     if not email or "@" not in email:
         return False
     return email.split("@", 1)[1].lower() in {d.lower() for d in ALLOWED_DOMAINS}
+
+
+# --- 機能フラグ（feature flag）---
+# 基礎習得までプランナーに見せたくない応用機能を、既定OFFで仕込むための仕組み。
+# フラグOFF＆非管理者には出さず、管理者はOFFでもプレビューできる（feature_visible）。
+# 応用①「反論・切り返しドリル」。基礎（導入・重点3商材）が身につくまで非表示にする。
+FEATURE_OBJECTION_DRILL = _bool_env("FEATURE_OBJECTION_DRILL", False)
+
+# 機能名 → フラグ値の対応表（未知の名前は False）。
+_FEATURE_FLAGS = {
+    "objection_drill": FEATURE_OBJECTION_DRILL,
+}
+
+
+def feature_enabled(name: str) -> bool:
+    """機能フラグが有効か（未知の名前は False）。"""
+    return bool(_FEATURE_FLAGS.get(name, False))
+
+
+def feature_visible(name: str, email: str | None) -> bool:
+    """その機能をこのユーザーに見せてよいか。
+
+    フラグが有効なら全員に、無効でも管理者にはプレビューとして見せる。
+    """
+    return feature_enabled(name) or is_admin(email)
 
 
 # --- 評価項目（1〜5段階）---
