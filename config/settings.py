@@ -176,7 +176,7 @@ def is_allowed_domain(email: str | None) -> bool:
 # 基礎習得までプランナーに見せたくない応用機能を、既定OFFで仕込むための仕組み。
 # フラグOFF＆非管理者には出さず、管理者はOFFでもプレビューできる（feature_visible）。
 # 応用①「反論・切り返しドリル」。基礎（導入・重点3商材）が身につくまで非表示にする。
-FEATURE_OBJECTION_DRILL = _bool_env("FEATURE_OBJECTION_DRILL", False)
+FEATURE_OBJECTION_DRILL = _bool_env("FEATURE_OBJECTION_DRILL", True)
 
 # 機能名 → フラグ値の対応表（未知の名前は False）。
 _FEATURE_FLAGS = {
