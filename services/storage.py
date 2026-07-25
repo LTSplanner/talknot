@@ -801,6 +801,9 @@ def persona_flavored_turns(scenario: dict) -> list[dict]:
     turns = scenario_turns(scenario)
     if not turns:
         return turns
+    # 手作り単元（ラポール等）は第一声・カンペをそのまま使う
+    if scenario.get("keep_opening"):
+        return turns
     persona = get_customer_persona()
     cat = scenario.get("group", "")
     undecided = scenario.get("customer_type") == "未検討"
