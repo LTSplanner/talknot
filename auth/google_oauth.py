@@ -57,10 +57,10 @@ def login_button() -> None:
     flow = _build_flow()
     auth_url, state = flow.authorization_url(
         access_type="offline",
+        # 既に許可済みのスコープは同意画面を出さず自動継続（毎回の許可画面を無くす）。
+        # 新規ユーザーや未許可スコープ（カレンダー等）は初回だけ同意画面が出る。
+        # prompt は指定しない（＝許可済みなら画面をスキップして最少クリックで戻る）。
         include_granted_scopes="true",
-        # consent を出す。新しく追加した権限（カレンダー等）は同意画面を出さないと
-        # 許可されないため。ログイン保持Cookieがあるので実際の再ログインは稀。
-        prompt="consent",
         # hd でドメインを優先表示（最終判定は handle_callback で行う）
         hd=settings.ALLOWED_DOMAINS[0] if settings.ALLOWED_DOMAINS else None,
     )
