@@ -32,6 +32,9 @@ jobs:
 
       - name: Update meeting-minutes knowledge
         env:
+          # リポジトリ直下を import パスに通す（`from services import ...` 用）。
+          # これが無いと import 時点で落ちて、Secrets未設定時の静かなスキップ(exit 0)に届かない。
+          PYTHONPATH: .
           KNOWLEDGE_SA_JSON: ${{ secrets.KNOWLEDGE_SA_JSON }}
           KNOWLEDGE_SHEET_ID: ${{ secrets.KNOWLEDGE_SHEET_ID }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
