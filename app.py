@@ -919,6 +919,30 @@ def _reset_roleplay() -> None:
         del st.session_state[k]
 
 
+@st.cache_data(ttl=600, show_spinner=False)
+def _unit_photo_bytes(key: str) -> bytes | None:
+    """単元のフック写真バイト列（シート保存のbase64を復元）。取得失敗は None。"""
+    try:
+        return storage.get_unit_photo(key)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _render_unit_hook_photo(scenario: dict) -> None:
+    """練習中の単元に紐づく『お客様に見せる施工事例（フック）』写真を表示する。
+
+    未設定なら何も出さない。取得・表示失敗は静かにスキップ（アプリを落とさない）。
+    """
+    try:
+        data = _unit_photo_bytes(storage.unit_photo_key(scenario))
+        if not data:
+            return
+        st.caption("📸 お客様に見せる施工事例（フック）")
+        st.image(data, use_container_width=True)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def render_roleplay_tab(user: dict) -> None:
     st.markdown("##### 🎙️ 1人ロープレ（AIのお客様と対話 → その場で評価）")
     st.write(
@@ -1004,6 +1028,9 @@ def render_roleplay_tab(user: dict) -> None:
                 )
             else:
                 st.caption("💡 まずは自分の言葉で。詰まったら上のチェックでカンペを開けます。")
+
+        # 📸 この単元の「お客様に見せる施工事例（フック）」（設定時のみ）
+        _render_unit_hook_photo(scenario)
     else:
         no_hint = sum(1 for u in used if not u)
         st.success(f"全 {len(turns)} ターン録音できました。評価に進めます。")
@@ -1028,7 +1055,110 @@ def render_roleplay_tab(user: dict) -> None:
             st.rerun()
 
     if settings.is_admin(user.get("email")):
+        _render_roleplay_override_admin()
         _render_script_admin()
+
+
+def _render_roleplay_override_admin() -> None:
+    """管理者向け：ロープレの『お客様セリフ・カンペ』編集と『フック写真』設定。
+
+    - セリフ/カンペは overrides レイヤーに保存（再生成しても消えない）。
+    - フック写真は単元（カテゴリ|タイトル）単位で知識シートに保存（外部フォルダ不要）。
+    """
+    with st.expander("🎭 ロープレのセリフ・写真を編集（管理者）"):
+        scenarios = storage.get_scenarios()
+        if not scenarios:
+            st.caption("編集できるシナリオがありません。")
+            return
+
+        # カテゴリ（模範トーク編集と同じ並び）→ 単元 を選ぶ
+        cats = [c for c in storage.SCRIPT_CATEGORY_ORDER
+                if any(s.get("group") == c for s in scenarios)]
+        extra = sorted({s.get("group", "") for s in scenarios
+                        if s.get("group") and s.get("group") not in cats})
+        cats = cats + extra
+        if not cats:
+            st.caption("カテゴリが設定されたシナリオがありません。")
+            return
+        ccol, ucol = st.columns([1, 2])
+        with ccol:
+            cat = st.selectbox("カテゴリ", cats, key="ov_cat")
+        pool = [s for s in scenarios if s.get("group") == cat]
+        with ucol:
+            labels = {s["id"]: f"{s.get('title', s['id'])}"
+                      f"（{s.get('customer_type', '検討済み')}）" for s in pool}
+            sid = st.selectbox("単元を選ぶ", options=list(labels),
+                               format_func=lambda i: labels[i], key="ov_scenario")
+        scenario = storage.get_scenario(sid) or (pool[0] if pool else None)
+        if not scenario:
+            return
+
+        raw_turns = storage.scenario_turns(scenario)
+        if not raw_turns:
+            st.caption("この単元にはターンがありません。")
+            return
+
+        # --- フック写真（単元単位・検討済み/未検討で共有・外部フォルダ不要）---
+        st.markdown("**📸 お客様に見せる施工事例（フック）— この単元に1枚**")
+        pkey = storage.unit_photo_key(scenario)
+        try:
+            cur = storage.get_unit_photo(pkey)
+        except Exception:  # noqa: BLE001
+            cur = None
+        if cur:
+            st.image(cur, width=260, caption="現在のフック写真")
+            if st.button("🗑️ 写真を削除", key=f"ov_photo_del_{sid}"):
+                storage.delete_unit_photo(pkey)
+                _unit_photo_bytes.clear()
+                st.success("写真を削除しました。")
+                st.rerun()
+        up = st.file_uploader("フック写真を設定/差し替え（PNG/JPG）",
+                              type=["png", "jpg", "jpeg"], key=f"ov_photo_up_{sid}")
+        if up is not None and st.button("📸 この写真を保存", key=f"ov_photo_save_{sid}"):
+            if storage.set_unit_photo(pkey, up.getvalue()):
+                _unit_photo_bytes.clear()
+                st.success("フック写真を保存しました（自動で縮小して保存）。")
+                st.rerun()
+            else:
+                st.warning(
+                    "写真を保存できませんでした（対応していない画像形式の可能性）。"
+                    "別の PNG / JPG でお試しください。"
+                )
+
+        st.divider()
+        # --- ターンごとの お客様セリフ / カンペ 編集（overrides レイヤー）---
+        n = len(raw_turns)
+        ti = st.selectbox("ターン", options=list(range(n)),
+                          format_func=lambda i: f"ターン {i + 1} / {n}", key=f"ov_turn_{sid}")
+        sc_ov = storage.get_scenario_overrides().get(sid, {}).get(str(ti), {})
+        cust_default = sc_ov.get("customer") or raw_turns[ti].get("customer", "")
+        hint_default = sc_ov.get("hint") or raw_turns[ti].get("hint", "")
+        cust = st.text_area("① お客様セリフ", value=cust_default, height=110,
+                            key=f"ov_cust_{sid}_{ti}")
+        hint = st.text_area("② カンペ（進め方・言い回し）", value=hint_default, height=180,
+                            key=f"ov_hint_{sid}_{ti}")
+        st.caption("※空にして保存すると、そのターンは元の台本（自動生成）に戻ります。")
+        if st.button("💾 このターンを保存", key=f"ov_save_{sid}_{ti}",
+                     use_container_width=True):
+            storage.update_scenario_turn_override(sid, ti, customer=cust, hint=hint)
+            st.success(f"ターン {ti + 1} を保存しました。")
+            st.rerun()
+
+        # 保存後プレビュー（上書き適用後の実際の表示に一致）
+        st.markdown("**プレビュー（実際のロープレ表示）**")
+        applied = storage.persona_flavored_turns(scenario)
+        if ti < len(applied):
+            _customer_bubble(applied[ti].get("customer", ""),
+                             scenario.get("customer_type", "検討済み"))
+            prev_hint = (applied[ti].get("hint") or "").strip()
+            if prev_hint:
+                st.markdown(
+                    '<div style="background:#EEF3FF;border-left:4px solid #6C5CE7;'
+                    'padding:.7rem 1rem;border-radius:8px;white-space:pre-wrap;'
+                    'line-height:1.7;font-size:.9rem">' + _esc(prev_hint) + "</div>",
+                    unsafe_allow_html=True,
+                )
+        _render_unit_hook_photo(scenario)
 
 
 def _render_script_admin() -> None:
@@ -1350,16 +1480,14 @@ def render_app(user: dict) -> None:
     components.sidebar(user)
     components.hero(compact=True)
 
-    evaluate, roleplay, gallery, reference, knowledge, history, about = st.tabs(
-        ["🎥 商談を評価する", "🎙️ 1人ロープレ", "📸 施工事例", "⭐ 模範トーク",
+    evaluate, roleplay, reference, knowledge, history, about = st.tabs(
+        ["🎥 商談を評価する", "🎙️ 1人ロープレ", "⭐ 模範トーク",
          "🧠 弊社ナレッジ", "🕘 評価履歴", "📊 評価項目について"]
     )
     with evaluate:
         render_evaluate_tab(user)
     with roleplay:
         render_roleplay_tab(user)
-    with gallery:
-        render_gallery_tab(user)
     with reference:
         render_reference_tab(user)
     with knowledge:
@@ -1369,84 +1497,6 @@ def render_app(user: dict) -> None:
     with about:
         st.markdown("##### KNOTE が見る 5 つの視点")
         components.criteria_overview()
-
-
-@st.cache_data(ttl=600, show_spinner=False)
-def _gallery_photo_bytes(file_id: str) -> bytes:
-    from services import gallery
-    return gallery.photo_bytes(file_id)
-
-
-def render_gallery_tab(user: dict) -> None:
-    from services import gallery
-
-    st.markdown("##### 📸 施工事例（お客様に見せるフック）")
-    st.write(
-        "商談で見せる施工事例の写真を、チームで共有します。"
-        "**アップロードは管理者のみ**／**閲覧・ダウンロードは全員**できます。"
-    )
-    is_admin = settings.is_admin(user.get("email"))
-
-    if not gallery.configured():
-        st.warning(
-            "施工事例フォルダが未設定です。共有ドライブに写真用フォルダを作り、"
-            "知識SA（talknot-knowledge@eigyou-ro-pure.iam.gserviceaccount.com）に"
-            "「編集者」で共有 → そのフォルダIDを `GALLERY_FOLDER_ID` に設定してください。"
-        )
-        return
-
-    # 管理者：アップロード
-    if is_admin:
-        with st.expander("⬆️ 施工事例をアップロード（管理者）", expanded=False):
-            files = st.file_uploader(
-                "写真（複数可）", type=["jpg", "jpeg", "png", "webp"],
-                accept_multiple_files=True, key="gal_up",
-            )
-            cat = st.selectbox("カテゴリ", settings.GALLERY_CATEGORIES, key="gal_cat")
-            caption = st.text_input("キャプション（任意・お客様への説明メモ）", key="gal_cap")
-            if files and st.button("この内容でアップロード", key="gal_do"):
-                ok = 0
-                for f in files:
-                    try:
-                        gallery.upload_photo(f.getvalue(), f.name, cat, caption,
-                                             f.type or "image/jpeg")
-                        ok += 1
-                    except Exception as e:  # noqa: BLE001
-                        st.error(f"{f.name}: {str(e)[:120]}")
-                if ok:
-                    _gallery_photo_bytes.clear()
-                    st.success(f"{ok} 枚アップロードしました。")
-                    st.rerun()
-
-    # 全員：閲覧＋ダウンロード
-    fcat = st.selectbox("カテゴリで絞り込み", ["すべて"] + list(settings.GALLERY_CATEGORIES),
-                        key="gal_filter")
-    try:
-        photos = gallery.list_photos(fcat)
-    except Exception as e:  # noqa: BLE001
-        st.error(f"写真の読み込みに失敗しました：{str(e)[:150]}")
-        return
-    if not photos:
-        st.caption("まだ施工事例がありません。")
-        return
-
-    st.caption(f"{len(photos)} 枚")
-    cols = st.columns(3)
-    for i, p in enumerate(photos):
-        with cols[i % 3]:
-            try:
-                data = _gallery_photo_bytes(p["id"])
-                st.image(data, use_container_width=True,
-                         caption=f"[{p['category']}] {p['caption']}".strip(" []"))
-                st.download_button("⬇️ ダウンロード", data=data, file_name=p["name"],
-                                   key=f"gal_dl_{p['id']}", use_container_width=True)
-            except Exception:
-                st.caption(f"（表示できませんでした：{p['name']}）")
-            if is_admin and st.button("🗑️ 削除", key=f"gal_del_{p['id']}",
-                                      use_container_width=True):
-                gallery.delete_photo(p["id"])
-                _gallery_photo_bytes.clear()
-                st.rerun()
 
 
 def main() -> None:

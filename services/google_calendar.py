@@ -23,12 +23,26 @@ def _norm(text: str) -> str:
     return re.sub(r"[\s　・|｜／/,、。]+", "", (text or "")).lower()
 
 
-def list_meetings(
-    credentials: Credentials, days_back: int = 60, days_ahead: int = 1
-) -> list[dict]:
-    """直近の『Meet付き予定（＝オンライン商談）』を新しい順で返す。
+# 商談タイトルに必ず入る案件番号（例: L260721484101）。全角Ｌ・間の空白も許容。
+# find_recording の照合と同じパターンを流用し、録画突き合わせと整合させる。
+_CASE_ID_RE = re.compile(r"[LＬ]\s*\d{6,}")
 
-    各要素: {id, summary, start, start_date, has_meet}
+
+def _case_id(summary: str) -> str | None:
+    """タイトルから案件番号を抜き出す（空白除去して返す）。無ければ None。"""
+    m = _CASE_ID_RE.search(summary or "")
+    return re.sub(r"\s", "", m.group()) if m else None
+
+
+def list_meetings(
+    credentials: Credentials, days_back: int = 60, days_ahead: int = 1,
+    deals_only: bool = True,
+) -> list[dict]:
+    """直近の予定を新しい順で返す。
+
+    deals_only=True（既定）のときは、タイトルに案件番号（L＋6桁以上）を含む
+    『商談』だけを返す（営業会議・テスト・交流会などの非商談は除外）。
+    各要素: {id, summary, start, start_date, has_meet, case_id}
     """
     service = _service(credentials)
     now = _dt.datetime.now(_dt.timezone.utc)
@@ -49,6 +63,11 @@ def list_meetings(
     )
     out: list[dict] = []
     for ev in resp.get("items", []):
+        summary = ev.get("summary", "（無題）")
+        case_id = _case_id(summary)
+        # 商談のみ表示：案件番号を持たない予定（会議・テスト等）は除外
+        if deals_only and not case_id:
+            continue
         start = ev.get("start", {})
         start_raw = start.get("dateTime") or start.get("date") or ""
         has_meet = bool(
@@ -57,10 +76,11 @@ def list_meetings(
         )
         out.append({
             "id": ev.get("id", ""),
-            "summary": ev.get("summary", "（無題）"),
+            "summary": summary,
             "start": start_raw,
             "start_date": start_raw[:10],
             "has_meet": has_meet,
+            "case_id": case_id or "",
         })
     out.sort(key=lambda e: e.get("start", ""), reverse=True)
     return out

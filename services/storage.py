@@ -37,6 +37,12 @@ _DOC_KINDS = {
     "persona": ("customer_persona.json", "CustomerPersona"),
     # ロープレの「進め方の切り口」コーチング（カテゴリ×属性別）
     "coaching": ("coaching_tips.json", "CoachingTips"),
+    # 管理者による「お客様セリフ・カンペ」の上書きレイヤー。
+    # シナリオを再生成(build script)しても、この上書きは別ドキュメントに保存されるため消えない。
+    "overrides": ("scenario_overrides.json", "ScenarioOverrides"),
+    # 単元（カテゴリ|タイトル）ごとの「お客様に見せるフック写真」。
+    # 縮小JPEGをbase64にしてシートへ保存（save_doc が行分割で長文も安全に保存する）。
+    "unit_photos": ("unit_photos.json", "UnitPhotos"),
 }
 _KNOWLEDGE_DOC_BUDGET = 60000   # base 上限
 _FAQ_DOC_BUDGET = 45000         # faq 上限
@@ -791,6 +797,129 @@ _DECIDED_OPENING = {
 }
 
 
+# --- 管理者による上書きレイヤー（お客様セリフ・カンペ）--------------------------- #
+# 構造: { "<scenario_id>": { "<turn_index>": {"customer": .., "hint": ..} } }
+# 指定フィールドのみ上書きし、未指定（または空文字）は元の台本のまま残す。
+# シナリオを再生成しても別ドキュメントに保存されるため、この編集は消えない。
+def set_scenario_overrides(overrides: dict) -> None:
+    set_knowledge_doc(json.dumps(overrides, ensure_ascii=False), kind="overrides")
+
+
+def get_scenario_overrides() -> dict:
+    raw = _load_knowledge_doc("overrides").strip()
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+        return data if isinstance(data, dict) else {}
+    except json.JSONDecodeError:
+        return {}
+
+
+def update_scenario_turn_override(
+    scenario_id: str,
+    turn_index: int,
+    *,
+    customer: str | None = None,
+    hint: str | None = None,
+) -> None:
+    """1ターン分の上書きを保存する（None のフィールドは変更しない）。
+
+    customer/hint に空文字を渡すと「元の台本に戻す」意味になる（適用時に空は無視するため）。
+    実質的に空になった要素は保存前に掃除する。
+    """
+    overrides = get_scenario_overrides()
+    sc = overrides.setdefault(scenario_id, {})
+    turn = sc.setdefault(str(turn_index), {})
+    if customer is not None:
+        turn["customer"] = customer
+    if hint is not None:
+        turn["hint"] = hint
+    if not ((turn.get("customer") or "").strip() or (turn.get("hint") or "").strip()):
+        sc.pop(str(turn_index), None)
+    if not sc:
+        overrides.pop(scenario_id, None)
+    set_scenario_overrides(overrides)
+
+
+# --- 単元（カテゴリ|タイトル）ごとの「お客様に見せるフック写真」----------------- #
+# 目的：練習中の単元に合わせて 1 枚の施工事例写真を表示するだけ。外部フォルダ不要。
+# 保存：縮小JPEG（最長辺480px・品質65）を base64 にして知識シートへ。save_doc が
+#       行分割で保存するためセル上限に当たらない。大きな写真でも落ちない設計。
+_UNIT_PHOTO_MAX_EDGE = 480
+_UNIT_PHOTO_QUALITY = 65
+
+
+def unit_photo_key(scenario: dict) -> str:
+    """単元の写真キー f'{group}|{title}'（検討済み/未検討で同じ写真を共有する）。"""
+    return f"{scenario.get('group', '')}|{scenario.get('title', '')}"
+
+
+def get_unit_photos() -> dict:
+    raw = _load_knowledge_doc("unit_photos").strip()
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+        return data if isinstance(data, dict) else {}
+    except json.JSONDecodeError:
+        return {}
+
+
+def _save_unit_photos(photos: dict) -> None:
+    set_knowledge_doc(json.dumps(photos, ensure_ascii=False), kind="unit_photos")
+
+
+def set_unit_photo(key: str, data: bytes) -> bool:
+    """単元のフック写真を縮小JPEG→base64で保存する。成功なら True。
+
+    大きな画像でもアプリを落とさないため、縮小・エンコードに失敗したら保存せず False を返す
+    （呼び出し側で警告表示）。Pillow は Streamlit 同梱。
+    """
+    import base64
+    import io as _io
+
+    try:
+        from PIL import Image
+    except Exception:
+        return False
+    try:
+        img = Image.open(_io.BytesIO(data))
+        if img.mode not in ("RGB", "L"):
+            img = img.convert("RGB")
+        img.thumbnail((_UNIT_PHOTO_MAX_EDGE, _UNIT_PHOTO_MAX_EDGE))
+        buf = _io.BytesIO()
+        img.save(buf, format="JPEG", quality=_UNIT_PHOTO_QUALITY, optimize=True)
+        b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+    except Exception:
+        return False
+    photos = get_unit_photos()
+    photos[key] = {"b64": b64, "mime": "image/jpeg"}
+    _save_unit_photos(photos)
+    return True
+
+
+def get_unit_photo(key: str) -> bytes | None:
+    """単元のフック写真のバイト列を返す（無ければ None）。"""
+    import base64
+
+    ent = get_unit_photos().get(key)
+    b64 = ent.get("b64") if isinstance(ent, dict) else ent
+    if not b64:
+        return None
+    try:
+        return base64.b64decode(b64)
+    except Exception:
+        return None
+
+
+def delete_unit_photo(key: str) -> None:
+    photos = get_unit_photos()
+    if key in photos:
+        photos.pop(key, None)
+        _save_unit_photos(photos)
+
+
 def persona_flavored_turns(scenario: dict) -> list[dict]:
     """台本のターンに、議事録由来のお客様ペルソナの“生の言い回し”を混ぜて返す。
 
@@ -801,7 +930,29 @@ def persona_flavored_turns(scenario: dict) -> list[dict]:
     turns = scenario_turns(scenario)
     if not turns:
         return turns
-    # 手作り単元（ラポール等）は第一声・カンペをそのまま使う
+
+    # --- 管理者の上書きレイヤー（お客様セリフ・カンペ）を最初に適用する ---------- #
+    # keep_opening（手作り単元）にも自動生成単元にも効かせるため、早期returnより前で適用。
+    # 指定フィールドのみ差し替え、空文字の customer/hint は「元の台本のまま」を意味し
+    # 上書きしない。どのターンで hint/customer を上書きしたかを記録し、後段のペルソナ
+    # 第一声・コーチング前置きが管理者の編集を潰さないようにする。
+    turns = [dict(t) for t in turns]
+    sc_ov = get_scenario_overrides().get(scenario.get("id", ""), {})
+    overridden_customer: set[int] = set()
+    overridden_hint: set[int] = set()
+    if isinstance(sc_ov, dict):
+        for idx, t in enumerate(turns):
+            o = sc_ov.get(str(idx))
+            if not isinstance(o, dict):
+                continue
+            if (o.get("customer") or "").strip():
+                t["customer"] = o["customer"]
+                overridden_customer.add(idx)
+            if (o.get("hint") or "").strip():
+                t["hint"] = o["hint"]
+                overridden_hint.add(idx)
+
+    # 手作り単元（ラポール等）は第一声・カンペをそのまま使う（上書き適用済みを返す）
     if scenario.get("keep_opening"):
         return turns
     persona = get_customer_persona()
@@ -818,16 +969,17 @@ def persona_flavored_turns(scenario: dict) -> list[dict]:
         if openings:
             seed = sum(ord(c) for c in scenario.get("id", "")) % len(openings)
             line = openings[seed]
-    turns = [dict(t) for t in turns]
-    if line:
+    # 管理者が第一声を上書きしている場合は、ペルソナ第一声で上書きしない（編集を尊重）
+    if line and 0 not in overridden_customer:
         turns[0] = dict(turns[0])
         turns[0]["customer"] = line
 
-    # カンペ冒頭に「進め方の切り口」コーチングを差し込む（潜在ニーズを掘る導線を示す）
+    # カンペ冒頭に「進め方の切り口」コーチングを差し込む（潜在ニーズを掘る導線を示す）。
+    # 管理者がカンペを上書きしている場合は前置きしない（管理者の編集を優先・二重表示を防ぐ）。
     tips = get_coaching_tips()
     key = f"{cat}|{'未検討' if undecided else '検討済み'}"
     tip = (tips.get(key) or tips.get(cat) or "").strip()
-    if tip:
+    if tip and 0 not in overridden_hint:
         turns[0] = dict(turns[0])
         base_hint = turns[0].get("hint", "")
         turns[0]["hint"] = (
