@@ -1154,6 +1154,12 @@ def render_roleplay_tab(user: dict) -> None:
         _speak(customer_line, speak_key, auto=first_time)
         st.session_state[spoken_key] = True
 
+        # 前のターンの録音ウィジェット値が残って表示に混ざらないよう、現在ターン以外の
+        # 録音キーを session から消す（録音本体は rp_audio に保存済みなので消して安全。
+        # この実行で描画するのは現在ターンの録音ウィジェットのみなので他キー削除は安全）。
+        for _stale in [k for k in list(st.session_state.keys())
+                       if isinstance(k, str) and k.startswith("rp_rec_") and k != rec_key]:
+            del st.session_state[_stale]
         # マイク。録音を止める＝新しい録音が検出されたら、自動で保存して次のセリフへ進む。
         rec = st.audio_input("🎤 マイクを押して、お客様に返答してください（40秒以内が目安）",
                              key=rec_key)
