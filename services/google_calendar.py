@@ -99,33 +99,45 @@ def find_recording(
     if not videos:
         return None
 
-    id_match = re.search(r"[LＬ]\s*\d{6,}", summary or "")
-    key_id = re.sub(r"\s", "", id_match.group()) if id_match else None
-
-    def score(v: dict) -> float:
-        name = v.get("name", "")
-        n_name, n_sum = _norm(name), _norm(summary)
-        s = 0.0
-        if key_id and _norm(key_id) in n_name:
-            s += 100
-        # タイトルの連続部分一致（顧客名・物件名など）
-        if n_sum:
-            longest = 0
-            for i in range(len(n_sum)):
-                for j in range(i + 4, len(n_sum) + 1):
-                    if n_sum[i:j] in n_name and (j - i) > longest:
-                        longest = j - i
-            s += longest
-        # 日付の近さ（±2日以内を加点）
+    def _date_rank(v: dict) -> int:
+        """作成日が予定日に近いほど大きい値（候補の中の順位付け＝タイブレークにのみ使う）。"""
         created = v.get("createdTime", "")[:10]
         if created and start_date:
             try:
-                d = abs((_dt.date.fromisoformat(created) - _dt.date.fromisoformat(start_date)).days)
-                if d <= 2:
-                    s += 8 - d * 2
+                d = abs((_dt.date.fromisoformat(created)
+                         - _dt.date.fromisoformat(start_date)).days)
+                return 10 - d
             except ValueError:
                 pass
-        return s
+        return -100
 
-    best = max(videos, key=score)
-    return best if score(best) >= 6 else None
+    # 1) 案件番号（L########）での厳密照合を最優先。
+    #    録画名に案件番号が無ければ、別のお客様の録画を誤って掴まないよう None を返す。
+    id_match = re.search(r"[LＬ]\s*\d{6,}", summary or "")
+    key_id = re.sub(r"\s", "", id_match.group()) if id_match else None
+    if key_id:
+        nk = _norm(key_id)
+        cands = [v for v in videos if nk in _norm(v.get("name", ""))]
+        return max(cands, key=_date_rank) if cands else None
+
+    # 2) 案件番号が無い予定のみ、名前の“固有部分”の一致で慎重に照合する。
+    #    汎用語（初回商談/オンライン等）は除き、5文字以上の連続一致がある時だけ採用。
+    #    日付の近さは候補の順位付け（タイブレーク）にのみ使い、単独では一致とみなさない。
+    cleaned = summary or ""
+    for g in ("初回商談", "商談", "オンライン", "打合せ", "打ち合わせ", "面談", "定例", "MTG", "mtg"):
+        cleaned = cleaned.replace(g, "")
+    n_spec = _norm(cleaned)
+    if not n_spec:
+        return None
+
+    def _overlap(v: dict) -> int:
+        n_name = _norm(v.get("name", ""))
+        longest = 0
+        for i in range(len(n_spec)):
+            for j in range(i + 5, len(n_spec) + 1):
+                if n_spec[i:j] in n_name and (j - i) > longest:
+                    longest = j - i
+        return longest
+
+    best = max(videos, key=lambda v: (_overlap(v), _date_rank(v)))
+    return best if _overlap(best) >= 5 else None
