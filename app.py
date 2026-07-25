@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import gc
 import os
+import random
 import shutil
 import tempfile
 import threading
@@ -905,11 +906,42 @@ def _roleplay_worker(
         gc.collect()
 
 
+def _session_turns(scenario: dict) -> list[dict]:
+    """台本ターンを取得し、`variants`（切り口違いの雑談パターン）があれば
+    セッション内で固定した1つに差し替えて返す。
+
+    - 選出はセッション毎に一度だけ（キー rp_variant_{scenario_id}_{turn_index}）。
+      同一セッションのリランでは選び直さないので、お客様セリフ表示・音声再生・AI評価が一致する。
+      リセット（rp_ 接頭辞のキーを一括削除）や別単元では選び直される。
+    - 管理者の overrides が入っているフィールドは variants より優先する（編集を尊重）。
+    """
+    turns = storage.persona_flavored_turns(scenario)
+    sid = scenario.get("id", "")
+    overrides = storage.get_scenario_overrides().get(sid, {})
+    for idx, t in enumerate(turns):
+        variants = t.get("variants")
+        if not (isinstance(variants, list) and variants):
+            continue
+        key = f"rp_variant_{sid}_{idx}"
+        pick = st.session_state.get(key)
+        if not isinstance(pick, int) or not (0 <= pick < len(variants)):
+            pick = random.randrange(len(variants))
+            st.session_state[key] = pick
+        v = variants[pick]
+        o = overrides.get(str(idx), {}) if isinstance(overrides, dict) else {}
+        if not (o.get("customer") or "").strip():
+            t["customer"] = str(v.get("customer", t.get("customer", "")))
+        if not (o.get("hint") or "").strip():
+            t["hint"] = str(v.get("hint", t.get("hint", "")))
+        t.pop("variants", None)
+    return turns
+
+
 def _start_roleplay_job(user: dict, scenario: dict, audio_turns: list) -> None:
     job_id = time.strftime("%Y%m%d_%H%M%S") + "_" + uuid.uuid4().hex[:6]
     label = f"🎙️1人ロープレ｜{scenario.get('title','')}"
     storage.start_evaluation(user["email"], job_id, label)
-    lines = [t["customer"] for t in storage.persona_flavored_turns(scenario)]
+    lines = [t["customer"] for t in _session_turns(scenario)]
     threading.Thread(
         target=_roleplay_worker,
         kwargs=dict(job_id=job_id, user_email=user["email"], label=label,
@@ -987,7 +1019,7 @@ def render_roleplay_tab(user: dict) -> None:
         sid = st.selectbox("単元を選ぶ", options=list(titles),
                            format_func=lambda i: titles[i], key="rp_scenario", disabled=locked)
     scenario = storage.get_scenario(sid) or items[0]
-    turns = storage.persona_flavored_turns(scenario)
+    turns = _session_turns(scenario)
     lv = scenario.get("level", 1)
     st.caption(
         f"👤 お客様タイプ：**{scenario.get('customer_type','検討済み')}**　"

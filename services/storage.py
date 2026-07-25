@@ -662,13 +662,23 @@ _DEFAULT_SCENARIOS = [
 
 
 def scenario_turns(scenario: dict) -> list[dict]:
-    """シナリオを [{customer, hint}] に正規化する（旧 lines 形式にも対応）。"""
+    """シナリオを [{customer, hint}] に正規化する（旧 lines 形式にも対応）。
+
+    ターンに `variants`（切り口違いの雑談パターン等）があればそのまま保持する。
+    どのパターンを使うかの選出は app 側（セッション内で固定できる場所）で行う。
+    """
     turns = scenario.get("turns")
     if isinstance(turns, list) and turns:
-        return [
-            {"customer": str(t.get("customer", "")), "hint": str(t.get("hint", ""))}
-            for t in turns if t.get("customer")
-        ]
+        out = []
+        for t in turns:
+            if not t.get("customer"):
+                continue
+            row = {"customer": str(t.get("customer", "")), "hint": str(t.get("hint", ""))}
+            variants = t.get("variants")
+            if isinstance(variants, list) and variants:
+                row["variants"] = variants
+            out.append(row)
+        return out
     return [{"customer": str(t), "hint": ""} for t in scenario.get("lines", []) if t]
 
 
