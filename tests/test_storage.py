@@ -200,3 +200,37 @@ def test_evaluations_use_sheets_when_configured(tmp_storage, monkeypatch):
     assert a_recs[0]["result"]["summary"] == SAMPLE["summary"]
     assert all(r["user_email"] == "a@x.com" for r in a_recs)
     assert len(store["rows"]) == 2  # 全体では2件（a完了・b処理中）
+
+
+def test_scenario_turns_preserves_variant_dialog():
+    """往復ロープレ用：variants 内の dialog が scenario_turns で保持されること。"""
+    scenario = {
+        "id": "intro_d",
+        "turns": [
+            {"customer": "はい。", "hint": "STEP1"},
+            {"customer": "第一声A", "hint": "STEP2",
+             "variants": [
+                 {"customer": "第一声A", "hint": "見本A",
+                  "dialog": ["第一声A", "もう一言A"]},
+             ]},
+        ],
+    }
+    turns = storage.scenario_turns(scenario)
+    assert len(turns) == 2
+    assert "variants" in turns[1]
+    v = turns[1]["variants"][0]
+    assert v["dialog"] == ["第一声A", "もう一言A"]
+    # dialog を持たないターンは variants を持たない（後方互換）
+    assert "variants" not in turns[0]
+
+
+def test_smalltalk_variants_have_consistent_dialog():
+    """SMALLTALK_VARIANTS の各 dialog は2件以上で、先頭が customer と一致すること。"""
+    from scripts.build_roleplay_scenarios import SMALLTALK_VARIANTS
+
+    assert len(SMALLTALK_VARIANTS) == 5
+    for v in SMALLTALK_VARIANTS:
+        dialog = v.get("dialog")
+        assert isinstance(dialog, list) and len(dialog) >= 2
+        assert dialog[0] == v["customer"]  # 第一声は既存 customer と同じ
+        assert all(str(d).strip() for d in dialog)

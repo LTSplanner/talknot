@@ -929,19 +929,32 @@ def _session_turns(scenario: dict) -> list[dict]:
             st.session_state[key] = pick
         v = variants[pick]
         o = overrides.get(str(idx), {}) if isinstance(overrides, dict) else {}
-        if not (o.get("customer") or "").strip():
+        cust_overridden = bool((o.get("customer") or "").strip())
+        if not cust_overridden:
             t["customer"] = str(v.get("customer", t.get("customer", "")))
         if not (o.get("hint") or "").strip():
             t["hint"] = str(v.get("hint", t.get("hint", "")))
+        # 往復ロープレ用：dialog（お客様の複数発話）を chosen variant から持たせる。
+        # 管理者が第一声を上書きしている場合は、そちらを尊重して単発フローにする。
+        dialog = v.get("dialog")
+        if (not cust_overridden and isinstance(dialog, list)
+                and len([d for d in dialog if str(d).strip()]) >= 2):
+            t["dialog"] = [str(d) for d in dialog if str(d).strip()]
         t.pop("variants", None)
     return turns
 
 
-def _start_roleplay_job(user: dict, scenario: dict, audio_turns: list) -> None:
+def _start_roleplay_job(user: dict, scenario: dict, audio_turns: list,
+                        scenario_lines: list | None = None) -> None:
     job_id = time.strftime("%Y%m%d_%H%M%S") + "_" + uuid.uuid4().hex[:6]
     label = f"🎙️1人ロープレ｜{scenario.get('title','')}"
     storage.start_evaluation(user["email"], job_id, label)
-    lines = [t["customer"] for t in _session_turns(scenario)]
+    # 録音1件ごとに対応づけた お客様セリフ（往復含む）を優先。無い/長さ不一致なら
+    # ターン第一声から再構成（後方互換のフォールバック）。
+    if scenario_lines and len(scenario_lines) == len(audio_turns):
+        lines = list(scenario_lines)
+    else:
+        lines = [t["customer"] for t in _session_turns(scenario)]
     threading.Thread(
         target=_roleplay_worker,
         kwargs=dict(job_id=job_id, user_email=user["email"], label=label,
@@ -1033,24 +1046,52 @@ def render_roleplay_tab(user: dict) -> None:
 
     audio = st.session_state.setdefault("rp_audio", [])
     used = st.session_state.setdefault("rp_hint_used", [])
-    turn = len(audio)
+    # 録音1件ごとに「どのお客様セリフへの応答か」を記録し、AI評価で音声と対応づける。
+    # 往復（1ターン内で複数お客様セリフ）でも音声とセリフを1対1で揃えられる。
+    lines_rec = st.session_state.setdefault("rp_lines", [])
+    # 現在のターン番号（往復ターンは複数録音を消費するため len(audio) とは別管理）。
+    turn = st.session_state.setdefault("rp_step", 0)
 
     if turn < len(turns):
         st.divider()
-        st.caption(f"ターン {turn + 1} / {len(turns)}")
-        _customer_bubble(turns[turn]["customer"], scenario.get("customer_type", "検討済み"))
-        _speak(turns[turn]["customer"], f"{sid}_{turn}")  # お客様のセリフを自動再生
+        # 往復サブフロー：chosen variant に dialog(2件以上) がある STEP2 は
+        # お客様→営業→お客様→営業… と複数往復する。dialog が無いターンは従来どおり単発。
+        dialog = turns[turn].get("dialog")
+        is_dialog = isinstance(dialog, list) and len(dialog) >= 2
+        if is_dialog:
+            dkey = f"rp_dialog_idx_{sid}_{turn}"
+            didx = st.session_state.setdefault(dkey, 0)
+            didx = max(0, min(int(didx), len(dialog) - 1))  # 安全にクランプ
+            customer_line = str(dialog[didx])
+            rec_key = f"rp_rec_{turn}_{didx}"
+            next_key = f"rp_next_{turn}_{didx}"
+            speak_key = f"{sid}_{turn}_{didx}"
+            st.caption(f"ターン {turn + 1} / {len(turns)}　（会話 {didx + 1} / {len(dialog)}）")
+        else:
+            customer_line = str(turns[turn].get("customer", ""))
+            rec_key = f"rp_rec_{turn}"
+            next_key = f"rp_next_{turn}"
+            speak_key = f"{sid}_{turn}"
+            st.caption(f"ターン {turn + 1} / {len(turns)}")
+
+        _customer_bubble(customer_line, scenario.get("customer_type", "検討済み"))
+        _speak(customer_line, speak_key)  # お客様のセリフ（ボタンで再生）
 
         # マイクを最初から表示（カウントダウン無し）。録音したら確定して次へ
         rec = st.audio_input("🎤 マイクを押して、お客様に返答してください（40秒以内が目安）",
-                             key=f"rp_rec_{turn}")
-        if rec is not None and st.button("✅ このターンを確定して次へ", key=f"rp_next_{turn}",
+                             key=rec_key)
+        if rec is not None and st.button("✅ このターンを確定して次へ", key=next_key,
                                          use_container_width=True):
             audio.append(rec.getvalue())
+            lines_rec.append(customer_line)
             used.append(bool(practice or st.session_state.get(f"rp_hint_{turn}")))
+            if is_dialog and didx + 1 < len(dialog):
+                st.session_state[dkey] = didx + 1   # 同ターン内で次の往復へ
+            else:
+                st.session_state["rp_step"] = turn + 1  # 次のターンへ
             st.rerun()
 
-        # --- カンペ（見ずに言えたら次のステップへ）---
+        # --- カンペ（見ずに言えたら次のステップへ）。往復中も会話見本を参照できる ---
         hint = (turns[turn].get("hint") or "").strip()
         if hint:
             show = practice or st.checkbox("📋 カンペを見る（見ずに言えたら次のステップ）",
@@ -1070,8 +1111,9 @@ def render_roleplay_tab(user: dict) -> None:
         _render_unit_hook_photo(scenario)
     else:
         no_hint = sum(1 for u in used if not u)
-        st.success(f"全 {len(turns)} ターン録音できました。評価に進めます。")
-        st.markdown(f"**カンペなしで言えた：{no_hint} / {len(turns)} ターン**")
+        total_rec = len(used) or len(turns)
+        st.success(f"全 {total_rec} 回 録音できました。評価に進めます。")
+        st.markdown(f"**カンペなしで言えた：{no_hint} / {total_rec} 回**")
         if used and no_hint == len(used):
             st.balloons()
             st.success("🎉 カンペなしで完走！次の単元にステップアップしましょう。")
@@ -1082,7 +1124,7 @@ def render_roleplay_tab(user: dict) -> None:
     c1, c2 = st.columns(2)
     with c1:
         if audio and st.button("🤖 終了して評価する", type="primary", use_container_width=True):
-            _start_roleplay_job(user, scenario, list(audio))
+            _start_roleplay_job(user, scenario, list(audio), list(lines_rec))
             _reset_roleplay()
             st.success("✅ 評価を開始しました。**この画面を閉じても大丈夫**です。")
             st.info("結果は「🕘 評価履歴」タブに出ます（混雑時は順番待ち）。")
