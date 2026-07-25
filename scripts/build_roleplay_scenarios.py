@@ -59,7 +59,7 @@ CATEGORY_UNIT_ORDER = {
         "フロアコーティングを行った", "種類を話す前の導入", "ガラス", "ＵＶ", "UV",
         "シリコン", "セラミック", "水回り", "水廻り", "特典", "決まった後",
     ],
-    "反論対応": [
+    "反論対応（コーティング）": [
         "反論①", "反論②", "反論③", "反論④", "反論⑤", "反論⑥",
     ],
 }
@@ -643,21 +643,22 @@ def main() -> None:
         for ctype in ("検討済み", "未検討"):
             scenarios.append({
                 "id": f"{drill['id']}_{'d' if ctype == '検討済み' else 'u'}",
-                "group": "反論対応", "title": drill["title"],
+                "group": "反論対応（コーティング）", "title": drill["title"],
                 "customer_type": ctype, "level": 2, "keep_opening": True,
                 "focus": OBJECTION_FOCUS,
                 "turns": [dict(t) for t in drill["turns"]],
             })
 
     # カテゴリの表示順を固定し、カテゴリ内は指定の単元順に並べる
-    order = {"導入": 0, "コーティング": 1, "エコカラット": 2, "ダウンライト": 3, "反論対応": 4}
+    order = {"導入": 0, "コーティング": 1, "エコカラット": 2, "ダウンライト": 3,
+             "反論対応（コーティング）": 4}
     scenarios.sort(key=lambda s: (order.get(s["group"], 9),
                                   _unit_rank(s["group"], s["title"]), s["customer_type"]))
 
     from collections import Counter
     by_cat = Counter(s["group"] for s in scenarios)
-    print(f"生成シナリオ: {len(scenarios)} 件（基礎4カテゴリ ＋ 反論対応 × 2タイプ）")
-    for c in ["導入", "コーティング", "エコカラット", "ダウンライト", "反論対応"]:
+    print(f"生成シナリオ: {len(scenarios)} 件（基礎4カテゴリ ＋ 反論対応（コーティング） × 2タイプ）")
+    for c in ["導入", "コーティング", "エコカラット", "ダウンライト", "反論対応（コーティング）"]:
         titles = sorted({s["title"] for s in scenarios if s["group"] == c})
         print(f"  ■ {c}: {by_cat.get(c,0)}件 / 単元 {len(titles)}: {'、'.join(titles)}")
 

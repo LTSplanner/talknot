@@ -1045,10 +1045,10 @@ def render_roleplay_tab(user: dict) -> None:
     # フラグOFF＆非管理者には出さない（管理者はOFFでもプレビュー可）。
     obj_visible = settings.feature_visible("objection_drill", user.get("email"))
     cat_order = list(storage.SCRIPT_CATEGORY_ORDER)
-    if obj_visible and "反論対応" not in cat_order:
+    if obj_visible and "反論対応（コーティング）" not in cat_order:
         # 基礎（4カテゴリ）の後・「その他」の手前に差し込む
         idx = cat_order.index("その他") if "その他" in cat_order else len(cat_order)
-        cat_order.insert(idx, "反論対応")
+        cat_order.insert(idx, "反論対応（コーティング）")
     groups: dict[str, list[dict]] = {}
     for cat in cat_order:
         g = [s for s in pool if s.get("group") == cat]
@@ -1061,7 +1061,7 @@ def render_roleplay_tab(user: dict) -> None:
     with ccol:
         group = st.selectbox("カテゴリ", list(groups), key="rp_group", disabled=locked)
     # 管理者プレビュー時（フラグOFFなのに反論対応が見えている）は準備中と分かるよう注記
-    if group == "反論対応" and not settings.feature_enabled("objection_drill"):
+    if group == "反論対応（コーティング）" and not settings.feature_enabled("objection_drill"):
         st.caption("🧪 準備中（管理者のみ表示）— 基礎習得後にプランナーへ開放予定の応用ドリルです。")
     with scol:
         # 同名単元は1つにまとめる（お客様タイプで分けない。未検討版があれば代表に）
