@@ -1038,13 +1038,9 @@ def render_roleplay_tab(user: dict) -> None:
     # 開始したら（会話中は）単元などの選択を固定する
     locked = bool(st.session_state.get("rp_started"))
 
-    # お客様の属性で段階的に練習する（検討済み → 未検討 の2択。単元の重複を防ぐ）
-    types = [t for t in ["検討済み", "未検討"]
-             if any(s.get("customer_type") == t for s in scenarios)]
-    ccol, gcol, scol = st.columns([1, 1, 2])
-    with ccol:
-        ctype = st.selectbox("お客様タイプ", types, key="rp_ctype", disabled=locked)
-    pool = [s for s in scenarios if s.get("customer_type", "検討済み") == ctype]
+    # お客様タイプ（検討済み/未検討）では分けない。カテゴリ→単元だけで選ぶ
+    # （どれを学べばよいか迷わせないため）。同名単元は未検討版を代表に1つへまとめる。
+    pool = list(scenarios)
     # カテゴリは固定順で表示。応用①「反論対応」は feature flag で制御し、
     # フラグOFF＆非管理者には出さない（管理者はOFFでもプレビュー可）。
     obj_visible = settings.feature_visible("objection_drill", user.get("email"))
@@ -1059,20 +1055,25 @@ def render_roleplay_tab(user: dict) -> None:
         if g:
             groups[cat] = g
     if not groups:
-        st.info("この条件に合う単元がありません。")
+        st.info("学べる単元がありません。")
         return
-    with gcol:
+    ccol, scol = st.columns([1, 2])
+    with ccol:
         group = st.selectbox("カテゴリ", list(groups), key="rp_group", disabled=locked)
     # 管理者プレビュー時（フラグOFFなのに反論対応が見えている）は準備中と分かるよう注記
     if group == "反論対応" and not settings.feature_enabled("objection_drill"):
         st.caption("🧪 準備中（管理者のみ表示）— 基礎習得後にプランナーへ開放予定の応用ドリルです。")
     with scol:
-        # 同名単元が複数あっても1つに（タイプで既に絞れているので通常は一意）
+        # 同名単元は1つにまとめる（お客様タイプで分けない。未検討版があれば代表に）
         items, seen_t = [], set()
         for s in groups[group]:
-            if s.get("title") not in seen_t:
-                seen_t.add(s.get("title"))
-                items.append(s)
+            t = s.get("title")
+            if t in seen_t:
+                continue
+            seen_t.add(t)
+            rep = next((x for x in groups[group]
+                        if x.get("title") == t and x.get("customer_type") == "未検討"), s)
+            items.append(rep)
         titles = {s["id"]: s.get("title", s["id"]) for s in items}
         sid = st.selectbox("単元を選ぶ", options=list(titles),
                            format_func=lambda i: titles[i], key="rp_scenario", disabled=locked)
@@ -1080,9 +1081,7 @@ def render_roleplay_tab(user: dict) -> None:
     turns = _session_turns(scenario)
     lv = scenario.get("level", 1)
     st.caption(
-        f"👤 お客様タイプ：**{scenario.get('customer_type','検討済み')}**　"
-        f"／ 難易度：{'★' * int(lv)}{'☆' * (2 - int(lv))}　"
-        f"／ 全 {len(turns)} ターン"
+        f"難易度：{'★' * int(lv)}{'☆' * (2 - int(lv))}　／ 全 {len(turns)} ターン"
     )
     if not storage.get_talk_script():
         st.caption("⚠️ 模範トークスクリプトが未登録です（下の管理者欄で登録すると、その型を基準に採点します）。")
