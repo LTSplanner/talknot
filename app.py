@@ -1246,10 +1246,19 @@ def _render_unit_admin() -> None:
         ccol, ucol = st.columns([1, 2])
         with ccol:
             cat = st.selectbox("カテゴリ", cats, key="ua_cat")
-        pool = [s for s in scenarios if s.get("group") == cat]
+        # お客様タイプで分けず、同名単元は未検討版を代表に1つへまとめる（ロープレ表示と一致）
+        all_in_cat = [s for s in scenarios if s.get("group") == cat]
+        pool, seen_t = [], set()
+        for s in all_in_cat:
+            t = s.get("title")
+            if t in seen_t:
+                continue
+            seen_t.add(t)
+            rep = next((x for x in all_in_cat
+                        if x.get("title") == t and x.get("customer_type") == "未検討"), s)
+            pool.append(rep)
         with ucol:
-            labels = {s["id"]: f"{s.get('title', s['id'])}"
-                      f"（{s.get('customer_type', '検討済み')}）" for s in pool}
+            labels = {s["id"]: s.get("title", s["id"]) for s in pool}
             sid = st.selectbox("単元を選ぶ", options=list(labels),
                                format_func=lambda i: labels[i], key="ua_scenario")
         scenario = storage.get_scenario(sid) or (pool[0] if pool else None)
