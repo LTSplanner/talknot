@@ -296,9 +296,22 @@ def _render_calendar_picker(creds, user: dict) -> None:
     only_meet = st.checkbox("Meet（オンライン商談）のみ表示", value=True, key="cal_meet_only")
     try:
         events = google_calendar.list_meetings(creds)
-    except Exception as e:  # スコープ不足など
+    except Exception as e:  # スコープ不足 / API無効 など
         msg = str(e)
-        if "insufficient" in msg.lower() or "scope" in msg.lower() or "403" in msg:
+        low = msg.lower()
+        api_disabled = ("accessnotconfigured" in low or "service_disabled" in low
+                        or "has not been used in project" in low or "it is disabled" in low)
+        scope_missing = ("insufficient" in low or "insufficientpermissions" in low
+                         or "access_token_scope_insufficient" in low
+                         or ("scope" in low and not api_disabled))
+        if api_disabled:
+            st.error(
+                "Google カレンダー API がプロジェクト側で無効のため連携できません。"
+                "（これはログインし直しても直りません）\n\n"
+                "Google Cloud Console → 「API とサービス」→ Calendar API を **有効化** すると使えます。"
+            )
+            st.caption(f"詳細：{msg[:200]}")
+        elif scope_missing:
             st.warning(
                 "カレンダー連携がまだ有効ではありません。**一度ログアウト→再ログイン**すると、"
                 "カレンダーの利用許可を求められて有効になります。"
@@ -307,7 +320,7 @@ def _render_calendar_picker(creds, user: dict) -> None:
                 from auth import persist, session as _sess
                 persist.clear(); _sess.logout(); st.rerun()
         else:
-            st.error(f"カレンダーの読み込みに失敗しました：{msg[:160]}")
+            st.error(f"カレンダーの読み込みに失敗しました：{msg[:200]}")
         return
 
     if only_meet:
