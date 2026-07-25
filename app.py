@@ -1048,8 +1048,11 @@ def render_roleplay_tab(user: dict) -> None:
     if obj_visible:
         # 「反論対応」で始まるカテゴリ（コーティング/エコカラット/ダウンライト…）をまとめて、
         # 基礎（4カテゴリ）の後・「その他」の手前に昇順で差し込む（3カテゴリを1フラグで制御）。
-        obj_cats = sorted({str(s.get("group", "")) for s in pool
-                           if str(s.get("group", "")).startswith("反論対応")})
+        present = {str(s.get("group", "")) for s in pool
+                   if str(s.get("group", "")).startswith("反論対応")}
+        # 基礎商材と同じ並び（コーティング→エコカラット→ダウンライト）に明示指定
+        _obj_pref = ["反論対応（コーティング）", "反論対応（エコカラット）", "反論対応（ダウンライト）"]
+        obj_cats = [c for c in _obj_pref if c in present] + sorted(present - set(_obj_pref))
         idx = cat_order.index("その他") if "その他" in cat_order else len(cat_order)
         for c in obj_cats:
             if c not in cat_order:
