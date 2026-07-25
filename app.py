@@ -1134,194 +1134,183 @@ def render_roleplay_tab(user: dict) -> None:
             st.rerun()
 
     if settings.is_admin(user.get("email")):
-        _render_roleplay_override_admin()
-        _render_script_admin()
+        _render_unit_admin()
 
 
-def _render_roleplay_override_admin() -> None:
-    """管理者向け：ロープレの『お客様セリフ・カンペ』編集と『フック写真』設定。
+def _render_unit_admin() -> None:
+    """管理者向け：単元を選び『ロープレ（セリフ/カンペ/写真）』と『模範トークスクリプト』を1画面で編集。
 
-    - セリフ/カンペは overrides レイヤーに保存（再生成しても消えない）。
+    - ロープレのセリフ/カンペは overrides レイヤーに保存（再生成しても消えない）。
     - フック写真は単元（カテゴリ|タイトル）単位で知識シートに保存（外部フォルダ不要）。
+    - 対応する模範トークスクリプト（タブ）があれば同じ画面で本文も編集できる（採点の型と連動）。
     """
-    with st.expander("🎭 ロープレのセリフ・写真を編集（管理者）"):
+    with st.expander("📝 単元を編集（模範トーク＆ロープレ）（管理者）"):
         scenarios = storage.get_scenarios()
         if not scenarios:
-            st.caption("編集できるシナリオがありません。")
+            st.caption("編集できる単元がありません。")
             return
 
-        # カテゴリ（模範トーク編集と同じ並び）→ 単元 を選ぶ
+        # カテゴリ → 単元（シナリオ）を選ぶ（この選択を両ペインで共有）
         cats = [c for c in storage.SCRIPT_CATEGORY_ORDER
                 if any(s.get("group") == c for s in scenarios)]
         extra = sorted({s.get("group", "") for s in scenarios
                         if s.get("group") and s.get("group") not in cats})
         cats = cats + extra
         if not cats:
-            st.caption("カテゴリが設定されたシナリオがありません。")
+            st.caption("カテゴリが設定された単元がありません。")
             return
         ccol, ucol = st.columns([1, 2])
         with ccol:
-            cat = st.selectbox("カテゴリ", cats, key="ov_cat")
+            cat = st.selectbox("カテゴリ", cats, key="ua_cat")
         pool = [s for s in scenarios if s.get("group") == cat]
         with ucol:
             labels = {s["id"]: f"{s.get('title', s['id'])}"
                       f"（{s.get('customer_type', '検討済み')}）" for s in pool}
             sid = st.selectbox("単元を選ぶ", options=list(labels),
-                               format_func=lambda i: labels[i], key="ov_scenario")
+                               format_func=lambda i: labels[i], key="ua_scenario")
         scenario = storage.get_scenario(sid) or (pool[0] if pool else None)
         if not scenario:
             return
-
         raw_turns = storage.scenario_turns(scenario)
-        if not raw_turns:
-            st.caption("この単元にはターンがありません。")
-            return
 
-        # --- フック写真（単元単位・検討済み/未検討で共有・外部フォルダ不要）---
-        st.markdown("**📸 お客様に見せる施工事例（フック）— この単元に1枚**")
-        pkey = storage.unit_photo_key(scenario)
-        try:
-            cur = storage.get_unit_photo(pkey)
-        except Exception:  # noqa: BLE001
-            cur = None
-        if cur:
-            st.image(cur, width=260, caption="現在のフック写真")
-            if st.button("🗑️ 写真を削除", key=f"ov_photo_del_{sid}"):
-                storage.delete_unit_photo(pkey)
-                _unit_photo_bytes.clear()
-                st.success("写真を削除しました。")
-                st.rerun()
-        up = st.file_uploader("フック写真を設定/差し替え（PNG/JPG）",
-                              type=["png", "jpg", "jpeg"], key=f"ov_photo_up_{sid}")
-        if up is not None and st.button("📸 この写真を保存", key=f"ov_photo_save_{sid}"):
-            if storage.set_unit_photo(pkey, up.getvalue()):
-                _unit_photo_bytes.clear()
-                st.success("フック写真を保存しました（自動で縮小して保存）。")
-                st.rerun()
+        tab_ov, tab_script = st.tabs(
+            ["🎭 ロープレ（セリフ・カンペ・写真）", "📝 模範トークスクリプト（採点の型）"])
+
+        # ---------- ロープレ編集（overrides ＋ フック写真）----------
+        with tab_ov:
+            if not raw_turns:
+                st.caption("この単元にはターンがありません。")
             else:
-                st.warning(
-                    "写真を保存できませんでした（対応していない画像形式の可能性）。"
-                    "別の PNG / JPG でお試しください。"
-                )
-
-        st.divider()
-        # --- ターンごとの お客様セリフ / カンペ 編集（overrides レイヤー）---
-        n = len(raw_turns)
-        ti = st.selectbox("ターン", options=list(range(n)),
-                          format_func=lambda i: f"ターン {i + 1} / {n}", key=f"ov_turn_{sid}")
-        sc_ov = storage.get_scenario_overrides().get(sid, {}).get(str(ti), {})
-        cust_default = sc_ov.get("customer") or raw_turns[ti].get("customer", "")
-        hint_default = sc_ov.get("hint") or raw_turns[ti].get("hint", "")
-        cust = st.text_area("① お客様セリフ", value=cust_default, height=110,
-                            key=f"ov_cust_{sid}_{ti}")
-        hint = st.text_area("② カンペ（進め方・言い回し）", value=hint_default, height=180,
-                            key=f"ov_hint_{sid}_{ti}")
-        st.caption("※空にして保存すると、そのターンは元の台本（自動生成）に戻ります。")
-        if st.button("💾 このターンを保存", key=f"ov_save_{sid}_{ti}",
-                     use_container_width=True):
-            storage.update_scenario_turn_override(sid, ti, customer=cust, hint=hint)
-            st.success(f"ターン {ti + 1} を保存しました。")
-            st.rerun()
-
-        # 保存後プレビュー（上書き適用後の実際の表示に一致）
-        st.markdown("**プレビュー（実際のロープレ表示）**")
-        applied = storage.persona_flavored_turns(scenario)
-        if ti < len(applied):
-            _customer_bubble(applied[ti].get("customer", ""),
-                             scenario.get("customer_type", "検討済み"))
-            prev_hint = (applied[ti].get("hint") or "").strip()
-            if prev_hint:
-                st.markdown(
-                    '<div style="background:#EEF3FF;border-left:4px solid #6C5CE7;'
-                    'padding:.7rem 1rem;border-radius:8px;white-space:pre-wrap;'
-                    'line-height:1.7;font-size:.9rem">' + _esc(prev_hint) + "</div>",
-                    unsafe_allow_html=True,
-                )
-        _render_unit_hook_photo(scenario)
-
-
-def _render_script_admin() -> None:
-    """管理者向け：模範トークスクリプトを『単元ごと』に確認・修正する。"""
-    with st.expander("📝 模範トークスクリプトを確認・修正（管理者）"):
-        items = storage.get_talk_script_items()
-        if not items:
-            st.caption("まだ登録されていません。研修で標準化したスクリプトを貼って保存してください。")
-            text = st.text_area("トークスクリプト本文", value="", height=220, key="rp_script_new")
-            if st.button("💾 保存する", key="rp_script_save_new"):
-                storage.set_talk_script(text)
-                st.success(f"保存しました（{len(text.strip()):,} 文字）。")
-                st.rerun()
-            return
-
-        total = sum(len(i.get("body", "")) for i in items)
-        st.caption(
-            f"登録済み：**{len(items)} 単元 / 合計 {total:,} 文字**（元スプレッドシートのタブ単位）。"
-            "ロープレ評価の🎯模範トーク視点は、この型の再現度で採点されます。"
-        )
-        # ロープレと同じカテゴリで単元を選ぶ（導入/コーティング/エコカラット/ダウンライト/その他）
-        cats = [c for c in storage.SCRIPT_CATEGORY_ORDER
-                if any(storage.script_category(i["tab"]) == c for i in items)]
-        ccol, tcol = st.columns([1, 2])
-        with ccol:
-            cat = st.selectbox("カテゴリ", cats, key="rp_sc_cat")
-        with tcol:
-            tabs = sorted({i["tab"] for i in items if storage.script_category(i["tab"]) == cat})
-            tab = st.selectbox("単元（タブ）", tabs, key="rp_sc_tab") if tabs else None
-        if cat == "その他":
-            st.caption("※ダウンライトのロープレは、この中の「住設」タブ内（照明・人感センサー）から自動生成しています。")
-        target = next((i for i in items if i.get("tab") == tab), None) if tab else None
-        if target:
-            body = st.text_area(f"「{tab}」の内容（{len(target.get('body','')):,}字）",
-                                value=target.get("body", ""), height=320, key=f"rp_sc_body_{tab}")
-            c1, c2 = st.columns(2)
-            with c1:
-                if st.button("💾 この単元を更新", key=f"rp_sc_save_{tab}", use_container_width=True):
-                    if storage.update_talk_script_item(tab, body):
-                        st.success(f"「{tab}」を更新しました。")
+                st.markdown("**📸 お客様に見せる施工事例（フック）— この単元に1枚**")
+                pkey = storage.unit_photo_key(scenario)
+                try:
+                    cur = storage.get_unit_photo(pkey)
+                except Exception:  # noqa: BLE001
+                    cur = None
+                if cur:
+                    st.image(cur, width=260, caption="現在のフック写真")
+                    if st.button("🗑️ 写真を削除", key=f"ua_photo_del_{sid}"):
+                        storage.delete_unit_photo(pkey)
+                        _unit_photo_bytes.clear()
+                        st.success("写真を削除しました。")
+                        st.rerun()
+                up = st.file_uploader("フック写真を設定/差し替え（PNG/JPG）",
+                                      type=["png", "jpg", "jpeg"], key=f"ua_photo_up_{sid}")
+                if up is not None and st.button("📸 この写真を保存", key=f"ua_photo_save_{sid}"):
+                    if storage.set_unit_photo(pkey, up.getvalue()):
+                        _unit_photo_bytes.clear()
+                        st.success("フック写真を保存しました（自動で縮小して保存）。")
                         st.rerun()
                     else:
-                        st.error("更新できませんでした。")
-            with c2:
-                if st.button("🤖 AIで整文提案", key=f"rp_sc_ai_{tab}", use_container_width=True):
-                    with st.spinner("営業目線で整文しています…"):
-                        try:
-                            st.session_state[f"rp_sc_prop_{tab}"] = \
-                                gemini_analyzer.refine_talk_script(body)
-                        except Exception as e:  # noqa: BLE001
-                            st.session_state[f"rp_sc_prop_{tab}"] = ""
-                            st.error(f"整文に失敗しました：{_friendly_gemini_error(e)}")
+                        st.warning(
+                            "写真を保存できませんでした（対応していない画像形式の可能性）。"
+                            "別の PNG / JPG でお試しください。"
+                        )
+
+                st.divider()
+                n = len(raw_turns)
+                ti = st.selectbox("ターン", options=list(range(n)),
+                                  format_func=lambda i: f"ターン {i + 1} / {n}",
+                                  key=f"ua_turn_{sid}")
+                sc_ov = storage.get_scenario_overrides().get(sid, {}).get(str(ti), {})
+                cust_default = sc_ov.get("customer") or raw_turns[ti].get("customer", "")
+                hint_default = sc_ov.get("hint") or raw_turns[ti].get("hint", "")
+                cust = st.text_area("① お客様セリフ", value=cust_default, height=110,
+                                    key=f"ua_cust_{sid}_{ti}")
+                hint = st.text_area("② カンペ（進め方・言い回し）", value=hint_default, height=180,
+                                    key=f"ua_hint_{sid}_{ti}")
+                st.caption("※空にして保存すると、そのターンは元の台本（自動生成）に戻ります。")
+                if st.button("💾 このターンを保存", key=f"ua_save_{sid}_{ti}",
+                             use_container_width=True):
+                    storage.update_scenario_turn_override(sid, ti, customer=cust, hint=hint)
+                    st.success(f"ターン {ti + 1} を保存しました。")
                     st.rerun()
 
-            # AIの整文案を確認して、OKなら反映
-            proposal = st.session_state.get(f"rp_sc_prop_{tab}")
-            if proposal:
-                st.markdown("**🤖 AI整文案（プレビュー）** — 内容はそのまま、言い回しを整えました")
-                col_o, col_n = st.columns(2)
-                with col_o:
-                    st.caption(f"現在（{len(body):,}字）")
-                    st.text(body[:1500] + ("…" if len(body) > 1500 else ""))
-                with col_n:
-                    st.caption(f"AI整文案（{len(proposal):,}字）")
-                    st.text(proposal[:1500] + ("…" if len(proposal) > 1500 else ""))
-                a1, a2 = st.columns(2)
-                with a1:
-                    if st.button("✅ この案で更新する", key=f"rp_sc_apply_{tab}",
-                                 type="primary", use_container_width=True):
-                        if storage.update_talk_script_item(tab, proposal):
-                            st.session_state.pop(f"rp_sc_prop_{tab}", None)
-                            st.success(f"「{tab}」をAI整文案で更新しました。")
-                            st.rerun()
-                with a2:
-                    if st.button("✖️ 却下する", key=f"rp_sc_reject_{tab}",
-                                 use_container_width=True):
-                        st.session_state.pop(f"rp_sc_prop_{tab}", None)
-                        st.rerun()
+                st.markdown("**プレビュー（実際のロープレ表示）**")
+                applied = storage.persona_flavored_turns(scenario)
+                if ti < len(applied):
+                    _customer_bubble(applied[ti].get("customer", ""),
+                                     scenario.get("customer_type", "検討済み"))
+                    prev_hint = (applied[ti].get("hint") or "").strip()
+                    if prev_hint:
+                        st.markdown(
+                            '<div style="background:#EEF3FF;border-left:4px solid #6C5CE7;'
+                            'padding:.7rem 1rem;border-radius:8px;white-space:pre-wrap;'
+                            'line-height:1.7;font-size:.9rem">' + _esc(prev_hint) + "</div>",
+                            unsafe_allow_html=True,
+                        )
+                _render_unit_hook_photo(scenario)
 
-        st.divider()
-        if st.button("🗑️ スクリプトをすべて消去", key="rp_script_clear"):
-            storage.set_talk_script("")
-            st.success("消去しました。")
-            st.rerun()
+        # ---------- 模範トークスクリプト編集（対応タブがあれば）----------
+        with tab_script:
+            items = storage.get_talk_script_items()
+            same = sorted({i["tab"] for i in items
+                           if storage.script_category(i["tab"]) == cat})
+            if not same:
+                st.caption(
+                    "この単元（カテゴリ）に対応する模範トークスクリプトはありません。"
+                    "手作り単元（ラポール・商談の導入など）は、左の🎭ロープレ側のカンペで管理します。"
+                )
+            else:
+                title = scenario.get("title", "")
+                auto = (next((t for t in same if t == title), None)
+                        or next((t for t in same if title and (title in t or t in title)), None)
+                        or same[0])
+                st.caption(
+                    "この単元の🎯模範トーク（採点の型）。ロープレのカンペと合わせて更新すると"
+                    "『模範トーク視点』の採点と揃います。"
+                )
+                tab = st.selectbox("対応する単元（タブ）", same,
+                                   index=same.index(auto), key=f"ua_sc_tab_{sid}")
+                target = next((i for i in items if i.get("tab") == tab), None)
+                if target:
+                    body = st.text_area(
+                        f"「{tab}」の内容（{len(target.get('body', '')):,}字）",
+                        value=target.get("body", ""), height=300, key=f"ua_sc_body_{tab}")
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        if st.button("💾 この単元を更新", key=f"ua_sc_save_{tab}",
+                                     use_container_width=True):
+                            if storage.update_talk_script_item(tab, body):
+                                st.success(f"「{tab}」を更新しました。")
+                                st.rerun()
+                            else:
+                                st.error("更新できませんでした。")
+                    with c2:
+                        if st.button("🤖 AIで整文提案", key=f"ua_sc_ai_{tab}",
+                                     use_container_width=True):
+                            with st.spinner("営業目線で整文しています…"):
+                                try:
+                                    st.session_state[f"ua_sc_prop_{tab}"] = \
+                                        gemini_analyzer.refine_talk_script(body)
+                                except Exception as e:  # noqa: BLE001
+                                    st.session_state[f"ua_sc_prop_{tab}"] = ""
+                                    st.error(f"整文に失敗しました：{_friendly_gemini_error(e)}")
+                            st.rerun()
+
+                    proposal = st.session_state.get(f"ua_sc_prop_{tab}")
+                    if proposal:
+                        st.markdown("**🤖 AI整文案（プレビュー）** — 内容はそのまま、言い回しを整えました")
+                        col_o, col_n = st.columns(2)
+                        with col_o:
+                            st.caption(f"現在（{len(body):,}字）")
+                            st.text(body[:1500] + ("…" if len(body) > 1500 else ""))
+                        with col_n:
+                            st.caption(f"AI整文案（{len(proposal):,}字）")
+                            st.text(proposal[:1500] + ("…" if len(proposal) > 1500 else ""))
+                        a1, a2 = st.columns(2)
+                        with a1:
+                            if st.button("✅ この案で更新する", key=f"ua_sc_apply_{tab}",
+                                         type="primary", use_container_width=True):
+                                if storage.update_talk_script_item(tab, proposal):
+                                    st.session_state.pop(f"ua_sc_prop_{tab}", None)
+                                    st.success(f"「{tab}」をAI整文案で更新しました。")
+                                    st.rerun()
+                        with a2:
+                            if st.button("✖️ 却下する", key=f"ua_sc_reject_{tab}",
+                                         use_container_width=True):
+                                st.session_state.pop(f"ua_sc_prop_{tab}", None)
+                                st.rerun()
 
 
 _CATEGORY_LABELS = {
