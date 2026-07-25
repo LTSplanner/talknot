@@ -823,22 +823,25 @@ def _customer_bubble(text: str, ctype: str) -> None:
     )
 
 
-def _speak(text: str, key: str) -> None:
-    """お客様のセリフを『ボタンを押したときだけ』読み上げる（自動再生しない）。
+def _speak(text: str, key: str, auto: bool = False) -> None:
+    """お客様のセリフを読み上げる。30〜40代女性の音声・API費用ゼロ。
 
-    タブを開いた瞬間に喋り出さないよう、必ずクリックで再生する。
-    30〜40代女性の音声・API費用ゼロ。
+    - `auto=False`（既定）: 「🔊 もう一度」ボタンを押したときだけ再生する。
+    - `auto=True`: この要素がマウントされた瞬間に **一度だけ** 自動再生する。
+      二重再生は Python 側の spoken フラグで防ぐ（auto=True を渡すのは
+      「開始後・そのターンに初めて来た時」だけ）。タブを開いただけでは喋らない。
     """
     import json as _json
 
     import streamlit.components.v1 as st_components
 
     payload = _json.dumps(text)
+    auto_js = "setTimeout(speak, 80);" if auto else "/* 自動再生しない */"
     st_components.html(
         f"""
         <button id="sp{key}" style="cursor:pointer;border:1px solid #6C5CE7;color:#6C5CE7;
           background:#fff;border-radius:999px;padding:.4rem 1rem;font-size:.9rem;font-weight:600">
-          ▶️ お客様のセリフを再生
+          🔊 もう一度きく
         </button>
         <script>
         (function() {{
@@ -869,7 +872,7 @@ def _speak(text: str, key: str) -> None:
           }}
           document.getElementById("sp{key}").onclick = speak;
           if (synth.onvoiceschanged !== undefined) {{ synth.onvoiceschanged = pickVoice; }}
-          // ※自動再生はしない。必ずボタンを押したときだけ再生する。
+          {auto_js}
         }})();
         </script>
         """,
@@ -969,6 +972,37 @@ def _reset_roleplay() -> None:
         del st.session_state[k]
 
 
+def _roleplay_undo_last() -> bool:
+    """直前に保存した1件の録音を取り消し、そのターン（往復なら会話ステップ）へ戻す。
+
+    自動進行で「今の録音をやり直す」ために使う。ナビ用スタック `rp_nav` の末尾を1つ戻し、
+    音声/対応セリフ/カンペ使用の各リストも1件ずつ巻き戻す。戻したターンの録音ウィジェット
+    値と自動再生済みフラグを消すので、そのターンは録音し直せてお客様セリフも再生し直す。
+    戻す録音が無ければ False。
+    """
+    nav = st.session_state.get("rp_nav") or []
+    if not nav:
+        return False
+    e = nav.pop()
+    st.session_state["rp_nav"] = nav
+    for lst_key in ("rp_audio", "rp_lines", "rp_hint_used"):
+        lst = st.session_state.get(lst_key)
+        if isinstance(lst, list) and lst:
+            lst.pop()
+    processed = st.session_state.get("rp_processed")
+    if isinstance(processed, list) and e.get("rec_key") in processed:
+        processed.remove(e["rec_key"])
+    # 録音ウィジェットの値を消して、そのターンをまっさらに録り直せるようにする
+    st.session_state.pop(e.get("rec_key"), None)
+    # 自動再生済みフラグを外し、戻ったターンでお客様セリフを再度読み上げる
+    st.session_state.pop(f"rp_spoken_{e.get('speak_key')}", None)
+    # 位置を戻す（往復なら会話インデックスも）
+    st.session_state["rp_step"] = int(e.get("turn", 0))
+    if e.get("dkey") is not None:
+        st.session_state[e["dkey"]] = int(e.get("didx", 0))
+    return True
+
+
 @st.cache_data(ttl=600, show_spinner=False)
 def _unit_photo_bytes(key: str) -> bytes | None:
     """単元のフック写真バイト列（シート保存のbase64を復元）。取得失敗は None。"""
@@ -1001,7 +1035,8 @@ def render_roleplay_tab(user: dict) -> None:
     )
 
     scenarios = storage.get_scenarios()
-    locked = bool(st.session_state.get("rp_audio"))
+    # 開始したら（会話中は）単元などの選択を固定する
+    locked = bool(st.session_state.get("rp_started"))
 
     # お客様の属性で段階的に練習する（検討済み → 未検討 の2択。単元の重複を防ぐ）
     types = [t for t in ["検討済み", "未検討"]
@@ -1059,8 +1094,30 @@ def render_roleplay_tab(user: dict) -> None:
     # 録音1件ごとに「どのお客様セリフへの応答か」を記録し、AI評価で音声と対応づける。
     # 往復（1ターン内で複数お客様セリフ）でも音声とセリフを1対1で揃えられる。
     lines_rec = st.session_state.setdefault("rp_lines", [])
+    # 自動進行の重複防止：処理済み録音ウィジェットkeyの一覧（同じ録音で二重に進まない）と、
+    # 「今の録音をやり直す」ためのナビ履歴（各録音の位置と speak_key を積む）。
+    processed = st.session_state.setdefault("rp_processed", [])
+    nav = st.session_state.setdefault("rp_nav", [])
     # 現在のターン番号（往復ターンは複数録音を消費するため len(audio) とは別管理）。
     turn = st.session_state.setdefault("rp_step", 0)
+
+    # --- 開始ゲート：開始するまではお客様は喋らない（タブを開いただけでは無音） -------- #
+    started = st.session_state.setdefault("rp_started", False)
+    if not started:
+        st.divider()
+        st.info(
+            "準備ができたら開始してください。**開始すると、お客様が自動で話し始めます。**"
+            "あとは各ターンで声で返答するだけ（録音を止めると自動で次のセリフへ進みます）。"
+        )
+        if st.button("▶ ロープレを始める", type="primary", use_container_width=True):
+            # rerun せず同じ実行のまま最初のターンへ。開始クリックのユーザー操作を
+            # そのまま活かして、1ターン目のお客様セリフを自動再生できる。
+            st.session_state["rp_started"] = True
+            started = True
+        if not started:
+            if settings.is_admin(user.get("email")):
+                _render_unit_admin()
+            return
 
     if turn < len(turns):
         st.divider()
@@ -1074,27 +1131,39 @@ def render_roleplay_tab(user: dict) -> None:
             didx = max(0, min(int(didx), len(dialog) - 1))  # 安全にクランプ
             customer_line = str(dialog[didx])
             rec_key = f"rp_rec_{turn}_{didx}"
-            next_key = f"rp_next_{turn}_{didx}"
             speak_key = f"{sid}_{turn}_{didx}"
             st.caption(f"ターン {turn + 1} / {len(turns)}　（会話 {didx + 1} / {len(dialog)}）")
         else:
+            didx = None
+            dkey = None
             customer_line = str(turns[turn].get("customer", ""))
             rec_key = f"rp_rec_{turn}"
-            next_key = f"rp_next_{turn}"
             speak_key = f"{sid}_{turn}"
             st.caption(f"ターン {turn + 1} / {len(turns)}")
 
         _customer_bubble(customer_line, scenario.get("customer_type", "検討済み"))
-        _speak(customer_line, speak_key)  # お客様のセリフ（ボタンで再生）
+        # お客様のセリフ：このターンに初めて来た時だけ自動再生（spoken フラグで二重再生を防ぐ）。
+        # 2回目以降の実行では auto=False になり「🔊 もう一度きく」ボタンだけを残す。
+        spoken_key = f"rp_spoken_{speak_key}"
+        first_time = not st.session_state.get(spoken_key, False)
+        _speak(customer_line, speak_key, auto=first_time)
+        st.session_state[spoken_key] = True
 
-        # マイクを最初から表示（カウントダウン無し）。録音したら確定して次へ
+        # マイク。録音を止める＝新しい録音が検出されたら、自動で保存して次のセリフへ進む。
         rec = st.audio_input("🎤 マイクを押して、お客様に返答してください（40秒以内が目安）",
                              key=rec_key)
-        if rec is not None and st.button("✅ このターンを確定して次へ", key=next_key,
-                                         use_container_width=True):
+        if nav and st.button("↩️ 今の録音をやり直す", key=f"rp_undo_{turn}_{didx}",
+                             use_container_width=True):
+            _roleplay_undo_last()
+            st.rerun()
+
+        if rec is not None and rec_key not in processed:
             audio.append(rec.getvalue())
             lines_rec.append(customer_line)
             used.append(bool(practice or st.session_state.get(f"rp_hint_{turn}")))
+            processed.append(rec_key)  # この録音ウィジェットは処理済み（二重進行を防ぐ）
+            nav.append({"rec_key": rec_key, "speak_key": speak_key,
+                        "turn": turn, "didx": didx, "dkey": dkey})
             if is_dialog and didx + 1 < len(dialog):
                 st.session_state[dkey] = didx + 1   # 同ターン内で次の往復へ
             else:
@@ -1129,17 +1198,23 @@ def render_roleplay_tab(user: dict) -> None:
             st.success("🎉 カンペなしで完走！次の単元にステップアップしましょう。")
         elif no_hint:
             st.caption("💪 いい調子です。次はカンペを開く回数を減らしてみましょう。")
+        # 直前の録音だけ録り直したい時のために、最後のターンへ1つ戻せる導線を残す
+        if nav and st.button("↩️ 最後の録音をやり直す", key="rp_undo_done",
+                             use_container_width=True):
+            _roleplay_undo_last()
+            st.rerun()
 
     st.divider()
     c1, c2 = st.columns(2)
     with c1:
-        if audio and st.button("🤖 終了して評価する", type="primary", use_container_width=True):
+        if audio and st.button("🤖 AIで評価する", type="primary", use_container_width=True):
             _start_roleplay_job(user, scenario, list(audio), list(lines_rec))
             _reset_roleplay()
             st.success("✅ 評価を開始しました。**この画面を閉じても大丈夫**です。")
             st.info("結果は「🕘 評価履歴」タブに出ます（混雑時は順番待ち）。")
     with c2:
-        if audio and st.button("↩️ やり直す（録音を破棄）", use_container_width=True):
+        # 開始後はいつでも全体をやり直せる（単元を選び直したい時の抜け道も兼ねる）
+        if st.button("↩️ 最初からやり直す（録音を破棄）", use_container_width=True):
             _reset_roleplay()
             st.rerun()
 
