@@ -823,20 +823,30 @@ def _customer_bubble(text: str, ctype: str) -> None:
     )
 
 
-def _speak(text: str, key: str, auto: bool = False) -> None:
+def _speak(text: str, key: str, auto: bool = False, nonce: int = 0) -> None:
     """お客様のセリフを読み上げる。30〜40代女性の音声・API費用ゼロ。
 
     - `auto=False`（既定）: 「🔊 もう一度」ボタンを押したときだけ再生する。
-    - `auto=True`: この要素がマウントされた瞬間に **一度だけ** 自動再生する。
-      二重再生は Python 側の spoken フラグで防ぐ（auto=True を渡すのは
-      「開始後・そのターンに初めて来た時」だけ）。タブを開いただけでは喋らない。
+    - `auto=True`: この要素がマウントされた瞬間に自動再生する。ただし
+      `sessionStorage` のガードで **同じセッション（nonce）× 同じ key では1回だけ**に
+      限定する（開始ボタンが再実行しない設計でも iframe 再マウントによる二重再生を防ぐ）。
+      nonce はロープレ開始ごとに増える世代番号（やり直し後も再生できる）。
+      タブを開いただけでは喋らない（auto=True を渡すのは開始後・初回ターンのみ）。
     """
     import json as _json
 
     import streamlit.components.v1 as st_components
 
     payload = _json.dumps(text)
-    auto_js = "setTimeout(speak, 80);" if auto else "/* 自動再生しない */"
+    if auto:
+        guard = _json.dumps(f"knspk_{nonce}_{key}")
+        auto_js = (
+            "try{var _ss=(window.parent||window).sessionStorage;var _k=" + guard + ";"
+            "if(!_ss.getItem(_k)){_ss.setItem(_k,'1');setTimeout(speak,80);}}"
+            "catch(e){setTimeout(speak,80);}"
+        )
+    else:
+        auto_js = "/* 自動再生しない */"
     st_components.html(
         f"""
         <button id="sp{key}" style="cursor:pointer;border:1px solid #6C5CE7;color:#6C5CE7;
@@ -1121,6 +1131,9 @@ def render_roleplay_tab(user: dict) -> None:
             # rerun せず同じ実行のまま最初のターンへ。開始クリックのユーザー操作を
             # そのまま活かして、1ターン目のお客様セリフを自動再生できる。
             st.session_state["rp_started"] = True
+            # 自動再生の世代番号を1つ進める（rp_ 接頭辞にしないので reset でも保持され、
+            # 開始のたびに一意になる＝同じ単元を再開しても自動再生が1回だけ効く）。
+            st.session_state["_speak_gen"] = st.session_state.get("_speak_gen", 0) + 1
             started = True
         if not started:
             if settings.is_admin(user.get("email")):
@@ -1154,7 +1167,8 @@ def render_roleplay_tab(user: dict) -> None:
         # 2回目以降の実行では auto=False になり「🔊 もう一度きく」ボタンだけを残す。
         spoken_key = f"rp_spoken_{speak_key}"
         first_time = not st.session_state.get(spoken_key, False)
-        _speak(customer_line, speak_key, auto=first_time)
+        _speak(customer_line, speak_key, auto=first_time,
+               nonce=st.session_state.get("_speak_gen", 0))
         st.session_state[spoken_key] = True
 
         # 前のターンの録音ウィジェット値が残って表示に混ざらないよう、現在ターン以外の
