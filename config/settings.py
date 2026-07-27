@@ -45,6 +45,19 @@ ALLOWED_DOMAINS = _csv_env("ALLOWED_DOMAINS", "yourcompany.com")
 # 模範トーク登録などの管理者操作を許可するメール。
 ADMIN_EMAILS = _csv_env("ADMIN_EMAILS")
 
+# 閲覧専用（幹部）：全メンバーの実績・成長を閲覧できるが、テンプレの編集・追加・削除など
+# 書き込み操作は一切できない。既定に幹部3名を入れておく（.env の VIEWER_EMAILS で変更可）。
+VIEWER_EMAILS = _csv_env(
+    "VIEWER_EMAILS",
+    ",".join(
+        [
+            "ryouchiku@life-time-support.com",
+            "rsuga@life-time-support.com",
+            "k.sasaki@life-time-support.com",
+        ]
+    ),
+)
+
 # --- 同時実行の制御（無料枠のメモリ保護）---
 # 同時に走らせる動画解析の最大数。無料枠（RAM 約1GB）では 1 が安全。
 # 余裕のあるホストに移したら増やせる（環境変数 MAX_CONCURRENT_ANALYSES）。
@@ -164,6 +177,16 @@ GEMINI_VIDEO_FPS = float(os.getenv("GEMINI_VIDEO_FPS", "0.5"))
 
 def is_admin(email: str | None) -> bool:
     return bool(email) and email in ADMIN_EMAILS
+
+
+def is_viewer(email: str | None) -> bool:
+    """閲覧専用（幹部）アカウントか。実績・成長の閲覧のみ可で、編集権限は持たない。"""
+    return bool(email) and email in VIEWER_EMAILS
+
+
+def can_view_all(email: str | None) -> bool:
+    """全メンバーの実績・成長を閲覧してよいか（管理者＝編集も可 / 幹部＝閲覧のみ）。"""
+    return is_admin(email) or is_viewer(email)
 
 
 def is_allowed_domain(email: str | None) -> bool:

@@ -673,6 +673,9 @@ def _render_member_dashboard(who: str, records: list[dict]) -> None:
 
     # --- サマリ指標 ---
     st.markdown(f"#### 📈 {who.split('@')[0]} さんの成長ダッシュボード")
+    if not records:
+        st.info("この対象者はまだ実績がありません（ロープレ・商談評価を行うとグラフが表示されます）。")
+        return
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("🎙️ ロープレ", f"{len(roleplay)} 回")
     m2.metric("🎥 商談評価", f"{len(meeting)} 回")
@@ -751,20 +754,27 @@ def _render_record_list(records: list[dict], key: str) -> None:
 def render_history_tab(user: dict) -> None:
     st.markdown("##### 評価履歴")
 
-    is_admin = settings.is_admin(user.get("email"))
+    email = user.get("email")
+    is_admin = settings.is_admin(email)
+    view_all = settings.can_view_all(email)  # 管理者 or 閲覧専用（幹部）
 
-    if is_admin:
-        # 管理者は切り替え不要で、常に「自分＋全メンバー」を閲覧できる。
+    if view_all:
+        # 管理者・幹部は切り替え不要で、常に全メンバーの実績・成長を閲覧できる。
         all_records = storage.list_all_evaluations()
         _render_practice_overview(all_records)
-        members = ["全員"] + sorted({r.get("user_email", "") for r in all_records if r.get("user_email")})
-        who = st.selectbox("メンバーで絞り込み（既定：全員を表示）", members, key="hist_member")
+        # 評価対象者（8名）は実績ゼロでも選べるようにする（成長グラフ用）。
+        rec_emails = {r.get("user_email", "") for r in all_records if r.get("user_email")}
+        members = ["全員"] + sorted(rec_emails | set(settings.TARGET_ACCOUNTS))
+        who = st.selectbox(
+            "メンバーで絞り込み（個人を選ぶと成長グラフを表示）", members,
+            format_func=lambda e: e if e == "全員" else e.split("@")[0], key="hist_member")
         if who != "全員":
             # 個人を選んだら成長ダッシュボード（推移グラフ＋左右2カラム一覧）
             _render_member_dashboard(who, [r for r in all_records if r.get("user_email") == who])
             return
         records = all_records
-        st.caption(f"表示中：{len(records)} 件（自分＋全メンバー／管理者として閲覧中）")
+        cap = "自分＋全メンバー／管理者として閲覧中" if is_admin else "全メンバー（閲覧専用）"
+        st.caption(f"表示中：{len(records)} 件（{cap}）")
     else:
         records = storage.list_evaluations(user["email"])
 
@@ -783,7 +793,7 @@ def render_history_tab(user: dict) -> None:
         owner = rec.get("user_email", "")
         who_tag = (
             f"　👤{owner.split('@')[0]}"
-            if is_admin and owner and owner != user.get("email") else ""
+            if view_all and owner and owner != user.get("email") else ""
         )
         with st.expander(
             f"{badge}　{rec.get('saved_at', '')}{who_tag}　{rec.get('label', '')}"
