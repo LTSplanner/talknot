@@ -360,7 +360,32 @@ def get_knowledge_items() -> list[dict]:
 
 
 # --- 社内ナレッジ資料（base=整備版 / faq / meetings の3セクション）-------------- #
+_DOC_CACHE: dict[str, tuple[float, str]] = {}
+_DOC_CACHE_TTL = 300.0  # 参照ドキュメント読み取りの短時間キャッシュ秒数（編集時は即破棄）
+
+
+def _invalidate_doc_cache() -> None:
+    """参照ドキュメントのキャッシュを破棄する（編集・保存の直後に呼ぶ）。"""
+    _DOC_CACHE.clear()
+
+
 def _load_knowledge_doc(kind: str = "base") -> str:
+    """参照ドキュメント（シナリオ/カンペ/模範トーク/写真/ナレッジ）を読む。
+
+    ロープレのシーン切替のたびに複数回シートを読みに行くとラグになるため、
+    短時間だけプロセス内キャッシュする。**AI評価や評価履歴の読み取りには一切関与せず**、
+    参照テキストの取得だけを速くするので、評価の精度には影響しない。編集時は
+    set 側で `_invalidate_doc_cache()` を呼んで即座に最新へ切り替える。
+    """
+    hit = _DOC_CACHE.get(kind)
+    if hit and hit[0] > time.time():
+        return hit[1]
+    val = _load_knowledge_doc_uncached(kind)
+    _DOC_CACHE[kind] = (time.time() + _DOC_CACHE_TTL, val)
+    return val
+
+
+def _load_knowledge_doc_uncached(kind: str = "base") -> str:
     name, tab = _DOC_KINDS[kind]
     if _use_sheets():
         from services import sheets_knowledge
@@ -389,6 +414,7 @@ def _load_knowledge_doc(kind: str = "base") -> str:
 def set_knowledge_doc(text: str, kind: str = "base") -> None:
     """社内ナレッジ資料テキストを丸ごと保存する（該当セクションを置き換える）。"""
     text = (text or "").strip()
+    _invalidate_doc_cache()  # 保存したら読み取りキャッシュを破棄して即座に反映させる
     name, tab = _DOC_KINDS[kind]
     if _use_sheets():
         from services import sheets_knowledge
