@@ -4,7 +4,39 @@ Gemini の出力もこの構造（JSON）に揃え、UI もこの構造を描画
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
+
+# 評価文でAIが英語のジョハリ用語（Open/Blind/Hidden/Unknown）を混ぜることがあるため、
+# 解析時に日本語（開放/盲点/秘密/未知 領域）へ統一する。過去に保存した評価も表示時に直る。
+_JA_JOHARI_SUBS = [
+    # 「English（開放/盲点/秘密/未知[領域]）」→ 日本語だけにする
+    (re.compile(r"[A-Za-z]+\s*[（(]\s*(開放|盲点|秘密|未知)\s*領域?\s*[）)]"), r"\1領域"),
+    # 「English領域」→ 日本語領域（大文字小文字問わず）
+    (re.compile(r"(?i)hidden\s*領域"), "秘密領域"),
+    (re.compile(r"(?i)blind\s*領域"), "盲点領域"),
+    (re.compile(r"(?i)open\s*領域"), "開放領域"),
+    (re.compile(r"(?i)unknown\s*領域"), "未知領域"),
+]
+
+
+def _ja_johari(text: str) -> str:
+    if not text:
+        return text
+    for pat, rep in _JA_JOHARI_SUBS:
+        text = pat.sub(rep, text)
+    return text
+
+
+def _deep_ja_johari(obj):
+    """dict/list を再帰的にたどり、文字列値のジョハリ英語表記を日本語へ置換する。"""
+    if isinstance(obj, str):
+        return _ja_johari(obj)
+    if isinstance(obj, dict):
+        return {k: _deep_ja_johari(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_deep_ja_johari(v) for v in obj]
+    return obj
 
 
 @dataclass
@@ -124,6 +156,9 @@ class EvaluationResult:
     @classmethod
     def from_dict(cls, data: dict) -> "EvaluationResult":
         """Gemini が返す JSON（core/prompts.py のフォーマット）からの復元。"""
+        # 英語のジョハリ用語（Hidden領域 等）を日本語（秘密領域 等）へ統一する
+        data = _deep_ja_johari(data)
+
         def _bool(v) -> bool:
             if isinstance(v, bool):
                 return v
