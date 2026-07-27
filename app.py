@@ -756,10 +756,10 @@ def render_history_tab(user: dict) -> None:
 
     email = user.get("email")
     is_admin = settings.is_admin(email)
-    view_all = settings.can_view_all(email)  # 管理者 or 閲覧専用（幹部）
+    view_all = settings.can_view_all(email)  # 管理者 or 閲覧専用
 
     if view_all:
-        # 管理者・幹部は切り替え不要で、常に全メンバーの実績・成長を閲覧できる。
+        # 管理者・閲覧専用は切り替え不要で、常に全メンバーの実績・成長を閲覧できる。
         all_records = storage.list_all_evaluations()
         _render_practice_overview(all_records)
         # 評価対象者（8名）は実績ゼロでも選べるようにする（成長グラフ用）。

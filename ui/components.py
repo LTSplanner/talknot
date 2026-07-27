@@ -213,6 +213,8 @@ def sidebar(user: dict) -> None:
         st.caption(user.get("email", ""))
         if settings.is_admin(user.get("email")):
             st.markdown("🛡️ 管理者")
+        elif settings.is_viewer(user.get("email")):
+            st.markdown("👁️ 閲覧専用")
         st.divider()
         if st.button("ログアウト", use_container_width=True):
             from auth import persist, session
