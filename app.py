@@ -1671,6 +1671,54 @@ def _render_meeting_admin(user: dict) -> None:
                 st.rerun()
 
 
+def _render_roleplay_nudge(user: dict) -> None:
+    """ログイン時に必ず目に入る、個人向けのロープレ習慣ナッジ。
+
+    「今日やった？」「🔥連続日数」「今週の本数」を軽く見せて、
+    “今日の1問”への一歩を促す（責めない・小さく・前向きに）。
+    毎操作でシートを読まないよう、セッション内で短時間キャッシュする。
+    閲覧専用（練習対象外）には出さない。
+    """
+    import datetime as _dt
+    import time as _time
+
+    email = user.get("email", "")
+    if settings.is_viewer(email):
+        return
+
+    cache = st.session_state.get("_nudge_cache")
+    if not cache or cache.get("exp", 0) < _time.time():
+        try:
+            recs = storage.list_evaluations(email)
+        except Exception:  # noqa: BLE001
+            return
+        dset = {str(r.get("saved_at", ""))[:10]
+                for r in recs if _is_roleplay(r) and r.get("saved_at")}
+        today = _dt.datetime.now(_dt.timezone(_dt.timedelta(hours=9))).date()  # JST
+        done_today = today.isoformat() in dset
+        streak, d = 0, (today if done_today else today - _dt.timedelta(days=1))
+        while d.isoformat() in dset:
+            streak += 1
+            d -= _dt.timedelta(days=1)
+        week_from = (today - _dt.timedelta(days=6)).isoformat()
+        week = sum(1 for x in dset if x >= week_from)
+        cache = {"exp": _time.time() + 180, "done": done_today,
+                 "streak": streak, "week": week}
+        st.session_state["_nudge_cache"] = cache
+
+    streak, week, done = cache["streak"], cache["week"], cache["done"]
+    wk = f"　／ 今週 {week} 本" if week else ""
+    if done:
+        st.success(f"✅ 今日のロープレ完了！ナイス継続です。"
+                   f"{'　🔥 連続' + str(streak) + '日' if streak else ''}{wk}")
+    elif streak > 0:
+        st.warning(f"🔥 連続{streak}日ストップ寸前！ 今日の**1問だけ・30秒**でつなげましょう。"
+                   f"{wk}　→「🎙️ 1人ロープレ」タブへ")
+    else:
+        st.info("🎙️ 今日のロープレ、まだですね。**まずは1問だけ・30秒**でOK。"
+                "「🎙️ 1人ロープレ」タブからどうぞ。")
+
+
 def render_app(user: dict) -> None:
     # LTS共通の利用ログに「起動」を1セッション1回だけ記録（失敗しても本体は止めない）
     if not st.session_state.get("_usage_logged"):
@@ -1679,6 +1727,7 @@ def render_app(user: dict) -> None:
 
     components.sidebar(user)
     components.hero(compact=True)
+    _render_roleplay_nudge(user)
 
     evaluate, roleplay, reference, knowledge, history, about = st.tabs(
         ["🎥 商談を評価する", "🎙️ 1人ロープレ", "⭐ 模範トーク",
