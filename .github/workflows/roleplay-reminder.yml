@@ -1,0 +1,47 @@
+name: roleplay-reminder
+
+# 平日15:00(JST) に「本日ロープレ未実施の人」へ個人Chat DM（またはWebhook投稿）を送る。
+# 必要な GitHub Secrets:
+#   KNOWLEDGE_SHEET_ID  … 評価履歴シートのID（当日実施の判定に使う）
+#   KNOWLEDGE_SA_JSON   … 評価履歴シートを読む知識SAの鍵JSON
+#   個人DM経路を使う場合（推奨）:
+#     CHAT_SA_JSON        … Chatアプリ用SAの鍵JSON（最小権限の専用SAを推奨）
+#     CHAT_ADMIN_SUBJECT  … Directory API 用に impersonate する管理者メール
+#   もしくはWebhook経路（簡易）:
+#     CHAT_WEBHOOK_URL    … 通知先スペースの Incoming Webhook URL
+# 未設定でもスクリプトは exit 0 で静かに終わる（Actions を赤くしない方針）。
+
+on:
+  schedule:
+    - cron: "0 6 * * 1-5"   # 06:00 UTC = 15:00 JST の平日(月〜金)
+  workflow_dispatch:          # 手動実行も可
+
+concurrency:
+  group: roleplay-reminder
+  cancel-in-progress: false
+
+jobs:
+  remind:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Send roleplay reminders
+        env:
+          # リポジトリ直下を import パスに通す（`from services import ...` 用）。
+          PYTHONPATH: .
+          KNOWLEDGE_SHEET_ID: ${{ secrets.KNOWLEDGE_SHEET_ID }}
+          KNOWLEDGE_SA_JSON: ${{ secrets.KNOWLEDGE_SA_JSON }}
+          CHAT_SA_JSON: ${{ secrets.CHAT_SA_JSON }}
+          CHAT_ADMIN_SUBJECT: ${{ secrets.CHAT_ADMIN_SUBJECT }}
+          CHAT_WEBHOOK_URL: ${{ secrets.CHAT_WEBHOOK_URL }}
+        # 失敗しても通知を鳴らさない（スクリプト自体も exit 0 方針だが二重で保険）。
+        run: python scripts/send_roleplay_reminders.py || true
