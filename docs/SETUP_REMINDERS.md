@@ -12,6 +12,53 @@ KNOTE に、ロープレを毎日の習慣にするための2つの仕組みを�
 
 ---
 
+## この手順書を「管理者のPCのClaude Code」に渡す場合
+
+そのまま渡してOKです。作業は2種類に分かれます。
+
+**🧑 人がブラウザで行う（Claude Code では実行できない・GUI操作）**
+- Google 管理コンソールでの「ドメイン全体の委任」スコープ追加（→ C）
+- Google Chat API の「構成（アプリ設定）」と組織公開（→ A-2, A-5）
+- Chat スペース作成 ＋ Incoming Webhook 発行（→ B）
+
+これらは `admin.google.com` / Google Chat の GUI 操作で、CLI/API では実質行えません。
+
+**🤖 Claude Code が代行できる（CLI で実行。`<PROJECT>` は例: `eigyou-ro-pure`）**
+```bash
+# 1) 必要な API を有効化
+gcloud services enable chat.googleapis.com admin.googleapis.com \
+  calendar-json.googleapis.com --project=<PROJECT>
+
+# 2) Chat 用の“最小権限”専用サービスアカウントと鍵を作る（強力なDWD鍵は流用しない）
+gcloud iam service-accounts create knote-chat --project=<PROJECT> \
+  --display-name="KNOTE Chat Reminder"
+gcloud iam service-accounts keys create knote-chat.json \
+  --iam-account=knote-chat@<PROJECT>.iam.gserviceaccount.com
+#   → このSAの「クライアントID」を、🧑の委任（Cと同手順）に chat.bot と
+#     admin.directory.user.readonly のスコープで登録してもらう
+
+# 3) GitHub Secrets を登録（リポジトリ LTSplanner/talknot）
+gh secret set KNOWLEDGE_SHEET_ID --body "<評価履歴シートID>"
+gh secret set KNOWLEDGE_SA_JSON  < knowledge-sa.json
+#   個人DM経路:
+gh secret set CHAT_SA_JSON        < knote-chat.json
+gh secret set CHAT_ADMIN_SUBJECT  --body "<Directoryを読める管理者メール>"
+#   かんたんWebhook経路（DMの代わり）:
+gh secret set CHAT_WEBHOOK_URL    --body "<スペースのWebhook URL>"
+
+# 4) カレンダー枠作成・リマインドの動作確認（送らない/書かない）
+export GOOGLE_SERVICE_ACCOUNT_FILE=/path/to/dwd-sa.json
+python scripts/setup_roleplay_calendar.py --dry-run     # 対象と内容を表示
+export KNOWLEDGE_SHEET_ID=... KNOWLEDGE_SA_FILE=/path/to/knowledge-sa.json
+python scripts/send_roleplay_reminders.py --dry-run     # 未実施者と本文を表示
+```
+
+**渡し方のコツ**：管理者のClaude Code にこのファイルを開かせ、
+「🤖の項目をCLIで実行し、🧑の項目は必要な操作を私（管理者）に指示して」と伝えると、
+自動化できる所は代行し、GUIが要る所は手順を案内してくれます。
+
+---
+
 ## 全体像（どの鍵が何に使われるか）
 
 | 用途 | 認証 | スコープ | 使う env |
