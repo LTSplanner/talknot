@@ -67,6 +67,7 @@ python scripts/send_roleplay_reminders.py --dry-run     # 未実施者と本文�
 | 個人DM（推奨） | Chat アプリSA + Directory DWD | `chat.bot` / `admin.directory.user.readonly` | `CHAT_SA_JSON`/`CHAT_SA_FILE`, `CHAT_ADMIN_SUBJECT` |
 | DMの簡易代替 | Incoming Webhook | 不要 | `CHAT_WEBHOOK_URL` |
 | 当日実施の判定 | 知識SA（読み取り） | `spreadsheets` | `KNOWLEDGE_SHEET_ID`, `KNOWLEDGE_SA_JSON`/`KNOWLEDGE_SA_FILE` |
+| 休みスキップ（任意） | DWD SA（各人を impersonate） | `calendar.readonly` | `CALENDAR_SA_JSON` or `GOOGLE_SERVICE_ACCOUNT_FILE` |
 
 > **セキュリティ注記**：Chat 用は **専用の最小権限 SA** を新規発行してください。録画/ドライブ用の
 > 強力な DWD 鍵を流用しないこと。強力な鍵は Streamlit 側に置かず **GitHub Secrets のみ** に。
@@ -171,3 +172,41 @@ python scripts/send_roleplay_reminders.py --dry-run
 
 `--dry-run` は当日未実施者と送信本文を表示するだけで、**一切送信しません**。
 Chat の env が未設定なら、通常実行でも送信せず警告して終了します（exit 0）。
+`--dry-run` では「未実施者 ／ うち休みでスキップ ／ 実際に送る人」も表示されます。
+
+---
+
+## F. 休みの人には送らない（休みスキップ・任意）
+
+当日ロープレ未実施の人でも、その日が**休み**ならリマインドは送りません。休みかどうかは
+本人のカレンダーの**予定タイトル**から判定します（DWD SA でカレンダーを読み取り）。
+
+### 判定ルール（タイトル語で判定）
+
+- **送らない（スキップ）**：タイトルに次の**OFF語**を含む予定が1つでもある人。
+  終日でも時間指定でも検出します（実運用では終日でなく `中谷OFF 09:00〜22:00` のように
+  時間指定で入るため、**終日かどうかは問いません**）。
+  - OFF語: `OFF`/`off`, `休み`, `お休み`, `有給`, `有休`, `休暇`, `全休`, `代休`,
+    `振替休日`, `振休`, `夏季休暇`, `冬季休暇`, `年末年始`, `全社休業`, `会社休`,
+    `リフレッシュ休暇`, `特別休暇`, `産休`, `育休`, `慶弔`
+  - 会社休（`夏季休暇` など）も対象（終日/時間指定を問わず送らない）。
+- **送る**：
+  - **半休は送る**（稼働扱い）。タイトルに**半休語**（`午前休`, `午後休`, `半休`,
+    `AM半休`, `PM半休`, `時間休`, `半日`）を含む予定は、OFF語を含んでいても休み扱いにしません。
+  - **祝日は送る**（祝日判定は実装しておらず、cron が平日のみのためそのまま平日として送信）。
+  - `事務DAY` / `MTG` / `私用中抜け` / `資料作成` などはOFF語でないので送ります
+    （**中抜けは稼働扱い**＝部分中抜けでは休みにしません）。
+
+> **前提**：本人が**カレンダーに「休み／有給／夏季休暇」等を入れていること**が必要です。
+> 予定が入っていなければ休みと判定できず、通常どおりリマインドが届きます。
+
+### 設定
+
+- 休みチェックには DWD SA のカレンダー**読み取り**が要ります。鍵は
+  `CALENDAR_SA_JSON`（鍵JSON文字列・Secrets 向け）または
+  `GOOGLE_SERVICE_ACCOUNT_FILE`（鍵ファイルのパス・ローカル向け）から読みます。
+  スコープは `https://www.googleapis.com/auth/calendar.readonly` を C と同手順で委任してください。
+- **未設定でも動きます**：カレンダーSAが無い・取得に失敗した場合は休み判定をスキップし、
+  **全員（未実施者）に送ります**（安全側。誤って全員無送信にはしません）。
+- GitHub Actions で使うには Secret `CALENDAR_SA_JSON` を登録します
+  （`.github/workflows/roleplay-reminder.yml` の env に設定済み。無ければ休み判定はスキップ）。

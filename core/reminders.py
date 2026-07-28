@@ -20,6 +20,22 @@ ROLEPLAY_LABEL_PREFIX = "🎙️"
 # JST（UTC+9）。日付の境界判定に使う。
 JST = _dt.timezone(_dt.timedelta(hours=9))
 
+# --- 休み（送信スキップ）判定用のキーワード ---------------------------------- #
+# イベントのタイトルに次の「OFF語」を含むと、その日は休みとみなす（送らない）。
+# 実運用では終日でなく時間指定で入る（例「中谷OFF 09:00〜22:00」）ため、
+# 終日/時間指定を問わずタイトルのキーワードだけで判定する。
+# ※「中抜け」「私用中抜け」等の部分中抜けは稼働扱いなので OFF語に含めない。
+OFF_KEYWORDS: tuple[str, ...] = (
+    "off", "お休み", "休み", "有給", "有休", "休暇", "全休", "代休",
+    "振替休日", "振休", "夏季休暇", "冬季休暇", "年末年始", "全社休業", "会社休",
+    "リフレッシュ休暇", "特別休暇", "産休", "育休", "慶弔",
+)
+# ただし「半休語」を含むイベントは稼働扱い（送る）。OFF語を含んでいても休みにしない。
+# 例: 「午前休」「午後休」「半休」「AM半休」「時間休」等。
+HALFDAY_KEYWORDS: tuple[str, ...] = (
+    "午前休", "午後休", "半休", "am半休", "pm半休", "時間休", "半日",
+)
+
 
 def today_jst_str(now: _dt.datetime | None = None) -> str:
     """JST での「今日」を "YYYY-MM-DD" で返す。
@@ -85,3 +101,38 @@ def missed_today(
         if not did_roleplay_today(records, email, today_jst_str):
             missed.append(email)
     return missed
+
+
+def _contains_any(title: str, keywords) -> bool:
+    """title（小文字化済み）に keywords のいずれかを含むか。"""
+    return any(kw in title for kw in keywords)
+
+
+def is_off_today(
+    events: list[dict],
+    *,
+    off_keywords=OFF_KEYWORDS,
+    halfday_keywords=HALFDAY_KEYWORDS,
+) -> bool:
+    """その日が「休み」かどうかをタイトル語で判定する（True ならリマインドを送らない）。
+
+    events は ``{"title": str}`` の簡易形のリスト（``all_day`` は任意・判定に使わない）。
+    実運用では OFF/休みが終日でなく時間指定で入る（例「中谷OFF 09:00〜22:00」）ため、
+    終日/時間指定を問わずタイトルのキーワードだけで判定する。
+
+    判定:
+      - タイトルにOFF語を含み かつ 半休語を含まないイベントが1つでもあれば True（送らない）。
+      - 半休語（午前休・午後休 等）を含むイベントは稼働扱いとし、休みにカウントしない
+        （OFF語を含んでいても False 側）。半休は必ず送るため、この優先を崩さない。
+      - 「事務DAY」「MTG」「私用中抜け」等はOFF語でないので休み扱いしない（送る）。
+      - 「夏季休暇」等の会社休は終日/時間指定を問わず休み扱い（送らない）。
+    大文字小文字は無視する。
+    """
+    for ev in events:
+        title = (ev.get("title") or "").lower()
+        # 半休語が入っていれば、そのイベントは休みにカウントしない（午前休/午後休を送る）。
+        if _contains_any(title, halfday_keywords):
+            continue
+        if _contains_any(title, off_keywords):
+            return True
+    return False

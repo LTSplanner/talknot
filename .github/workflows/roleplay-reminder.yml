@@ -9,6 +9,8 @@ name: roleplay-reminder
 #     CHAT_ADMIN_SUBJECT  … Directory API 用に impersonate する管理者メール
 #   もしくはWebhook経路（簡易）:
 #     CHAT_WEBHOOK_URL    … 通知先スペースの Incoming Webhook URL
+#   休みスキップ（任意・あれば使う）:
+#     CALENDAR_SA_JSON    … カレンダー読み取り用DWD SAの鍵JSON（無ければ休み判定はスキップ）
 # 未設定でもスクリプトは exit 0 で静かに終わる（Actions を赤くしない方針）。
 
 on:
@@ -43,5 +45,7 @@ jobs:
           CHAT_SA_JSON: ${{ secrets.CHAT_SA_JSON }}
           CHAT_ADMIN_SUBJECT: ${{ secrets.CHAT_ADMIN_SUBJECT }}
           CHAT_WEBHOOK_URL: ${{ secrets.CHAT_WEBHOOK_URL }}
+          # 休みスキップ（任意）：あれば当日「休み」の人には送らない。無ければ全員に送る。
+          CALENDAR_SA_JSON: ${{ secrets.CALENDAR_SA_JSON }}
         # 失敗しても通知を鳴らさない（スクリプト自体も exit 0 方針だが二重で保険）。
         run: python scripts/send_roleplay_reminders.py || true

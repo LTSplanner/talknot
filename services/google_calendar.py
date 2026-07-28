@@ -141,3 +141,60 @@ def find_recording(
 
     best = max(videos, key=lambda v: (_overlap(v), _date_rank(v)))
     return best if _overlap(best) >= 5 else None
+
+
+# --------------------------------------------------------------------------- #
+# 休みスキップ判定用：SA(DWD) で対象者の当日予定を取得する
+# --------------------------------------------------------------------------- #
+# 休み判定は「読み取り」だけで足りるため readonly スコープを使う。
+_CALENDAR_READONLY_SCOPES = ["https://www.googleapis.com/auth/calendar.readonly"]
+_JST = _dt.timezone(_dt.timedelta(hours=9))
+
+
+def _normalize_event(ev: dict) -> dict:
+    """カレンダーAPIの生イベントを ``{"title", "all_day"}`` の簡易形に正規化する。
+
+    休み判定はタイトル語のみで行う（all_day は使わない）が、参考情報として保持する。
+    all_day は start が 'date'（'dateTime' でない）かどうかで判定する。
+    """
+    start = ev.get("start", {}) or {}
+    all_day = bool(start.get("date")) and not start.get("dateTime")
+    return {"title": ev.get("summary", "") or "", "all_day": all_day}
+
+
+def list_events_on(
+    date_str: str, subject_email: str, sa_info: dict
+) -> list[dict]:
+    """subject_email を impersonate して date_str（"YYYY-MM-DD"・JST）の予定を返す。
+
+    ドメイン全体委任（DWD）のサービスアカウント情報 sa_info（鍵JSONの dict）で対象者に
+    なりすまし、その日の予定を ``{"title", "all_day"}`` のリストに正規化して返す。
+    終日/時間指定の両方を拾う（休み判定はタイトル語で行うため all_day でフィルタしない）。
+    休みスキップ判定にのみ使う想定で、呼び出しは送信スクリプトからのみ行う。
+
+    ※ライブAPIを呼ぶため、ユニットテストからは呼ばないこと。
+    """
+    from google.oauth2 import service_account
+    from googleapiclient.discovery import build
+
+    creds = service_account.Credentials.from_service_account_info(
+        sa_info, scopes=_CALENDAR_READONLY_SCOPES
+    ).with_subject(subject_email)
+    service = build("calendar", "v3", credentials=creds, cache_discovery=False)
+
+    day = _dt.date.fromisoformat(date_str)
+    time_min = _dt.datetime.combine(day, _dt.time.min, tzinfo=_JST).isoformat()
+    time_max = _dt.datetime.combine(day, _dt.time.max, tzinfo=_JST).isoformat()
+    resp = (
+        service.events()
+        .list(
+            calendarId="primary",
+            timeMin=time_min,
+            timeMax=time_max,
+            singleEvents=True,
+            orderBy="startTime",
+            maxResults=50,
+        )
+        .execute()
+    )
+    return [_normalize_event(ev) for ev in resp.get("items", [])]

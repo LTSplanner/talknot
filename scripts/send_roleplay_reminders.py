@@ -17,13 +17,58 @@ storage 実行 env: KNOWLEDGE_SHEET_ID, KNOWLEDGE_SA_JSON か KNOWLEDGE_SA_FILE�
 from __future__ import annotations
 
 import argparse
+import json
+import os
 import sys
 
 from config import settings
 from core import reminders
-from services import google_chat, sheets_knowledge
+from services import google_calendar, google_chat, sheets_knowledge
 
 _APP_URL = "https://talknot-lts.streamlit.app"
+
+
+def _calendar_sa_info() -> dict | None:
+    """休みチェック用のカレンダーSA情報（鍵JSONのdict）を env から読む。
+
+    CALENDAR_SA_JSON（JSON文字列）を優先し、無ければ GOOGLE_SERVICE_ACCOUNT_FILE
+    （鍵ファイルのパス）を使う。どちらも無効なら None（＝休みチェックはスキップ）。
+    """
+    raw = (os.getenv("CALENDAR_SA_JSON") or "").strip()
+    if raw:
+        try:
+            return json.loads(raw)
+        except (ValueError, TypeError):
+            return None
+    path = (settings.GOOGLE_SERVICE_ACCOUNT_FILE or "").strip()
+    if path and os.path.exists(path):
+        try:
+            with open(path, encoding="utf-8") as f:
+                return json.load(f)
+        except (OSError, ValueError):
+            return None
+    return None
+
+
+def _filter_out_dayoff(
+    missed: list[str], today: str, sa_info: dict
+) -> tuple[list[str], list[str]]:
+    """未実施者から「その日が休みの人」を除いて (送る, スキップ) に分ける。
+
+    カレンダー取得や判定で失敗した人は安全側（送る）に倒す。全員無送信を招かない。
+    """
+    to_send: list[str] = []
+    dayoff: list[str] = []
+    for email in missed:
+        off = False
+        try:
+            events = google_calendar.list_events_on(today, email, sa_info)
+            off = reminders.is_off_today(events)
+        except Exception as e:  # noqa: BLE001 取得失敗は通常送信に倒す
+            print(f"  休み判定に失敗（通常どおり送信）: {email}: {str(e)[:120]}")
+            off = False
+        (dayoff if off else to_send).append(email)
+    return to_send, dayoff
 
 
 def _name_of(email: str) -> str:
@@ -65,8 +110,21 @@ def main() -> int:
     for email in missed:
         print(f"  - {email}")
 
+    # 休みスキップ：カレンダーSAが使えるなら、その日が終日休みの人を送信対象から外す。
+    # SA未設定・取得失敗時は「その人は通常どおり送る」（安全側）。
+    dayoff: list[str] = []
+    if missed:
+        sa_info = _calendar_sa_info()
+        if sa_info is None:
+            print("カレンダーSA未設定（CALENDAR_SA_JSON / GOOGLE_SERVICE_ACCOUNT_FILE）。休み判定はスキップ（全員に送る）。")
+        else:
+            missed, dayoff = _filter_out_dayoff(missed, today, sa_info)
+            print(f"うち休みでスキップ: {len(dayoff)} 名 / 実際に送る: {len(missed)} 名")
+            for email in dayoff:
+                print(f"  休みスキップ: {email}")
+
     if not missed:
-        print("全員実施済み。リマインド不要。")
+        print("送る対象なし。リマインド不要。")
         return 0
 
     email_to_text = {email: _message_for(email) for email in missed}

@@ -80,6 +80,57 @@ class TestMissedToday:
 
 
 # --------------------------------------------------------------------------- #
+# is_off_today（休みスキップ判定：タイトル語・終日/時間指定を問わない）
+# --------------------------------------------------------------------------- #
+def _ev(title, all_day=False):
+    return {"title": title, "all_day": all_day}
+
+
+class TestIsOffToday:
+    def test_timed_off_event_is_off(self):
+        # 時間指定の「中谷OFF 09:00〜22:00」→ 休み（スキップ）。
+        assert reminders.is_off_today([_ev("中谷OFF 09:00〜22:00")])
+
+    def test_timed_halfday_is_not_off(self):
+        # 時間指定の「午前休 09:00〜13:00」→ 半休なので送る。
+        assert not reminders.is_off_today([_ev("午前休 09:00〜13:00")])
+
+    def test_all_day_paid_leave_is_off(self):
+        assert reminders.is_off_today([_ev("有給休暇", all_day=True)])
+
+    def test_summer_holiday_is_off(self):
+        # 会社休（夏季休暇）は終日/時間指定を問わず休み。
+        assert reminders.is_off_today([_ev("夏季休暇 09:00〜18:00")])
+        assert reminders.is_off_today([_ev("夏季休暇", all_day=True)])
+
+    def test_office_day_is_not_off(self):
+        # 「事務DAY」はOFF語でないので送る。
+        assert not reminders.is_off_today([_ev("事務DAY 09:00〜22:00")])
+
+    def test_private_step_out_is_not_off(self):
+        # 「私用中抜け」はOFF語でない（部分中抜けは稼働扱い）ので送る。
+        assert not reminders.is_off_today([_ev("私用中抜け 14:00〜15:00")])
+
+    def test_no_off_keyword_is_not_off(self):
+        assert not reminders.is_off_today([_ev("MTG"), _ev("資料作成")])
+
+    def test_case_insensitive_off(self):
+        assert reminders.is_off_today([_ev("Off")])
+        assert reminders.is_off_today([_ev("安栗off 09:00〜18:00")])
+
+    def test_halfday_overrides_even_with_off_word(self):
+        # 半休語を含めば、OFF語があっても休みにカウントしない（送る）。
+        assert not reminders.is_off_today([_ev("午後休（有給）")])
+
+    def test_off_wins_when_separate_events(self):
+        # 半休イベントと別に終日OFFがあれば休み（スキップ）。
+        assert reminders.is_off_today([_ev("午前休 09:00〜12:00"), _ev("有給 13:00〜18:00")])
+
+    def test_empty_events_is_not_off(self):
+        assert not reminders.is_off_today([])
+
+
+# --------------------------------------------------------------------------- #
 # today_jst_str（JST境界の簡易確認）
 # --------------------------------------------------------------------------- #
 class TestTodayJstStr:
