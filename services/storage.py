@@ -9,12 +9,25 @@
 """
 from __future__ import annotations
 
+import datetime as _dt
 import json
 import time
 from pathlib import Path
 
 from config import settings
 from core.models import EvaluationResult, KnowledgeItem
+
+_JST = _dt.timezone(_dt.timedelta(hours=9))
+
+
+def _now_jst_str() -> str:
+    """保存時刻を JST（+9）の "YYYY-MM-DD HH:MM:SS" で返す。
+
+    サーバ(Streamlit Cloud)のタイムゾーンは UTC のため、time.strftime だと UTC で
+    記録され表示が9時間ずれる。評価履歴の表示・ナッジ/休みの日付判定はすべて JST 前提
+    なので、ここで JST に固定する。
+    """
+    return _dt.datetime.now(_JST).strftime("%Y-%m-%d %H:%M:%S")
 
 # 弊社ナレッジ（蓄積知識）の保存名と上限。
 _KNOWLEDGE_NAME = "knowledge.json"
@@ -157,7 +170,7 @@ def add_reference_talk(text: str, label: str = "") -> None:
         "label": label,
         "status": "done",
         "text": text,
-        "added_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "added_at": _now_jst_str(),
     })
     _save_reference(items[-_REFERENCE_MAX_ITEMS:])
 
@@ -170,7 +183,7 @@ def start_reference_job(job_id: str, label: str = "") -> None:
         "label": label,
         "status": "processing",
         "text": "",
-        "added_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "added_at": _now_jst_str(),
     })
     _save_reference(items[-_REFERENCE_MAX_ITEMS:])
 
@@ -505,7 +518,7 @@ def count_meeting_insights() -> int:
 def add_meeting_insights(doc_id: str, items: list[dict]) -> int:
     """1つの議事録から抽出した知見を追記する（知見0件でも処理済みとして記録）。"""
     existing = _load_meeting_insights()
-    now = time.strftime("%Y-%m-%d %H:%M:%S")
+    now = _now_jst_str()
     added = 0
     for it in items:
         insight = (it.get("insight") or "").strip()
@@ -1159,7 +1172,7 @@ def _eval_record(
     return {
         "job_id": job_id,
         "user_email": user_email,
-        "saved_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "saved_at": _now_jst_str(),
         "status": status,
         "label": label,
         "result_json": json.dumps(result.to_dict(), ensure_ascii=False) if result else "",
@@ -1176,7 +1189,7 @@ def save_evaluation(user_email: str, result: EvaluationResult, label: str = "") 
     handle = _eval_handle(user_email, job_id)
     _write_eval(handle, {
         "user_email": user_email, "label": label,
-        "saved_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "saved_at": _now_jst_str(),
         "status": "done", "result": result.to_dict(),
     })
     return job_id
@@ -1189,7 +1202,7 @@ def start_evaluation(user_email: str, job_id: str, label: str = "") -> str:
         return job_id
     _write_eval(_eval_handle(user_email, job_id), {
         "user_email": user_email, "label": label,
-        "saved_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "saved_at": _now_jst_str(),
         "status": "processing", "result": None,
     })
     return job_id
@@ -1204,7 +1217,7 @@ def finish_evaluation(
         return
     _write_eval(_eval_handle(user_email, job_id), {
         "user_email": user_email, "label": label,
-        "saved_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "saved_at": _now_jst_str(),
         "status": "done", "result": result.to_dict(),
     })
 
@@ -1218,7 +1231,7 @@ def fail_evaluation(
         return
     _write_eval(_eval_handle(user_email, job_id), {
         "user_email": user_email, "label": label,
-        "saved_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "saved_at": _now_jst_str(),
         "status": "error", "error": error, "result": None,
     })
 
