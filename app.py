@@ -1221,6 +1221,30 @@ def render_roleplay_tab(user: dict) -> None:
                     'line-height:1.7;font-size:.93rem">' + _esc(hint) + "</div>",
                     unsafe_allow_html=True,
                 )
+                # 次シーンへの橋渡し：この後お客様が何と言うかを先に見せ、
+                # 「どこへ繋ぐか（着地点）」を明確にしてベクトルずれを防ぐ。
+                nxt_line = ""
+                if is_dialog and didx is not None and didx + 1 < len(dialog):
+                    nxt_line = str(dialog[didx + 1])          # 同シーン内の次の発話
+                elif turn + 1 < len(turns):
+                    nt = turns[turn + 1]
+                    nd = nt.get("dialog")
+                    nxt_line = (nt.get("customer")
+                                or (str(nd[0]) if isinstance(nd, list) and nd else "")
+                                or "")
+                if nxt_line:
+                    st.markdown(
+                        '<div style="background:#FFF3E9;border-left:4px solid #FF6F61;'
+                        'padding:.6rem .95rem;border-radius:8px;margin-top:.5rem;'
+                        'font-size:.9rem;line-height:1.7">'
+                        '🎯 <b>次への橋渡し</b><br>この後お客様はこう来ます：「'
+                        + _esc(nxt_line) + '」<br>'
+                        '<span style="color:#8B8397">→ 今の一言を、この反応へ自然につながる'
+                        '方向で。迷ったら「この一文に着地させる」イメージで話しましょう。</span></div>',
+                        unsafe_allow_html=True,
+                    )
+                elif turn + 1 >= len(turns):
+                    st.caption("🏁 これが最後のシーン。気持ちよく締めて、AIで評価しましょう。")
             else:
                 st.caption("💡 まずは自分の言葉で。詰まったら上のチェックでカンペを開けます。")
 
