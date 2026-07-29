@@ -7,6 +7,7 @@ core.models.EvaluationResult として返す。
 from __future__ import annotations
 
 import json
+import re
 import time
 
 from google import genai
@@ -19,6 +20,34 @@ from core.models import EvaluationResult
 # 動画アップロード後 ACTIVE になるまでのポーリング設定
 _POLL_INTERVAL_SEC = 2
 _POLL_TIMEOUT_SEC = 300
+
+# 出力(JSON)の上限。長尺の商談でも途中で切れにくいよう広めに取る。
+_MAX_OUTPUT_TOKENS = 32768
+
+# JSON厳守を促す追記（リトライ時にプロンプト末尾へ付ける）
+_STRICT_JSON = ("\n\n重要：応答は有効なJSONオブジェクトのみを返すこと。"
+                "途中で切らず、コードフェンス(```)や前後の説明文を一切付けない。")
+
+
+def _loads_lenient(text: str) -> dict:
+    """Gemini 応答を JSON として頑健に読む。
+
+    - ```json フェンスや前後の余計な文字（Extra data）を除去して parse する。
+    - まず素直に、失敗したら最初の { 〜 最後の } を切り出して再挑戦する。
+    - 途中切断（Unterminated＝閉じ括弧が無い）はここでは直せないため、
+      呼び出し側で1回だけ再生成リトライする。
+    """
+    s = (text or "").strip()
+    if s.startswith("```"):
+        s = re.sub(r"^```[a-zA-Z]*\s*", "", s)
+        s = re.sub(r"\s*```$", "", s).strip()
+    try:
+        return json.loads(s)
+    except json.JSONDecodeError:
+        i, j = s.find("{"), s.rfind("}")
+        if i != -1 and j > i:
+            return json.loads(s[i:j + 1])
+        raise
 
 
 def _client() -> genai.Client:
@@ -68,26 +97,30 @@ def analyze(
 
     prompt = prompts.build_evaluation_prompt(reference_talk, knowledge_base)
 
-    response = client.models.generate_content(
-        model=settings.GEMINI_MODEL,
-        contents=[_media_part(uploaded), prompt],
-        config=types.GenerateContentConfig(
-            response_mime_type="application/json",
-            # 動画は声・間が読めれば十分。映像解像度を下げてトークン消費を大幅削減し、
-            # 長尺の商談録画でも上限/無料枠に当たりにくくする（軽量化重視）。
-            media_resolution=types.MediaResolution.MEDIA_RESOLUTION_LOW,
-            # 出力(JSON)が途中で切れて parse 失敗するのを防ぐため上限を広げる。
-            max_output_tokens=16384,
-        ),
+    cfg = types.GenerateContentConfig(
+        response_mime_type="application/json",
+        # 動画は声・間が読めれば十分。映像解像度を下げてトークン消費を大幅削減し、
+        # 長尺の商談録画でも上限/無料枠に当たりにくくする（軽量化重視）。
+        media_resolution=types.MediaResolution.MEDIA_RESOLUTION_LOW,
+        max_output_tokens=_MAX_OUTPUT_TOKENS,
     )
-
-    # 解析後はアップロード済みファイルを後始末（失敗しても致命的ではない）
     try:
-        client.files.delete(name=uploaded.name)
-    except Exception:
-        pass
+        resp = client.models.generate_content(
+            model=settings.GEMINI_MODEL, contents=[_media_part(uploaded), prompt], config=cfg)
+        data = _loads_lenient(resp.text)
+    except json.JSONDecodeError:
+        # 途中切断/不正JSONのことがあるため、JSON厳守を促して1回だけ再試行する。
+        resp = client.models.generate_content(
+            model=settings.GEMINI_MODEL,
+            contents=[_media_part(uploaded), prompt + _STRICT_JSON], config=cfg)
+        data = _loads_lenient(resp.text)
+    finally:
+        # 解析後はアップロード済みファイルを後始末（失敗しても致命的ではない）
+        try:
+            client.files.delete(name=uploaded.name)
+        except Exception:
+            pass
 
-    data = json.loads(response.text)
     return EvaluationResult.from_dict(data)
 
 
@@ -116,15 +149,19 @@ def analyze_roleplay(
         contents.append(types.Part.from_bytes(data=data, mime_type=mime_type))
     contents.append(prompt)
 
-    response = client.models.generate_content(
-        model=settings.GEMINI_MODEL,
-        contents=contents,
-        config=types.GenerateContentConfig(
-            response_mime_type="application/json",
-            max_output_tokens=16384,
-        ),
+    cfg = types.GenerateContentConfig(
+        response_mime_type="application/json",
+        max_output_tokens=_MAX_OUTPUT_TOKENS,
     )
-    return EvaluationResult.from_dict(json.loads(response.text))
+    try:
+        resp = client.models.generate_content(
+            model=settings.GEMINI_MODEL, contents=contents, config=cfg)
+        data = _loads_lenient(resp.text)
+    except json.JSONDecodeError:
+        resp = client.models.generate_content(
+            model=settings.GEMINI_MODEL, contents=contents + [_STRICT_JSON], config=cfg)
+        data = _loads_lenient(resp.text)
+    return EvaluationResult.from_dict(data)
 
 
 _REFINE_PROMPT = (
