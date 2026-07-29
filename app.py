@@ -630,6 +630,9 @@ def _render_practice_overview(all_records: list[dict]) -> None:
     for r in all_records:
         who = r.get("user_email", "") or "(不明)"
         s = stats.setdefault(who, {"roleplay": 0, "meeting": 0, "last": ""})
+        # 失敗（エラー）は実施回数・最終実施に数えない（行は残して0表示にする）
+        if r.get("status") == "error":
+            continue
         if str(r.get("label", "")).startswith("🎙️"):
             s["roleplay"] += 1
         else:
@@ -676,9 +679,12 @@ def _render_member_dashboard(who: str, records: list[dict]) -> None:
     if not records:
         st.info("この対象者はまだ実績がありません（ロープレ・商談評価を行うとグラフが表示されます）。")
         return
+    # 失敗（エラー）は回数に数えない（実施できた分だけをカウント）
+    rp_cnt = sum(1 for r in roleplay if r.get("status") != "error")
+    mt_cnt = sum(1 for r in meeting if r.get("status") != "error")
     m1, m2, m3, m4 = st.columns(4)
-    m1.metric("🎙️ ロープレ", f"{len(roleplay)} 回")
-    m2.metric("🎥 商談評価", f"{len(meeting)} 回")
+    m1.metric("🎙️ ロープレ", f"{rp_cnt} 回")
+    m2.metric("🎥 商談評価", f"{mt_cnt} 回")
     scored = [(_avg_score(r["result"]), r) for r in done]
     scored = [(v, r) for v, r in scored if v is not None]
     scored.sort(key=lambda x: x[1].get("saved_at", ""))
