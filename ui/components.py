@@ -135,7 +135,7 @@ def _customer_profile(profile) -> None:
 
 
 def criteria_overview() -> None:
-    """5つの評価項目をカードで一覧表示する。"""
+    """5つの評価項目をカードで一覧表示し、下に 1〜5 点の見かた（ルーブリック）を添える。"""
     cols = st.columns(len(settings.EVALUATION_CRITERIA))
     for col, c in zip(cols, settings.EVALUATION_CRITERIA):
         with col:
@@ -149,25 +149,59 @@ def criteria_overview() -> None:
                 """,
                 unsafe_allow_html=True,
             )
+    _score_rubric()
+
+
+# 1〜5点の見かた（プランナー視点）。各項目は「総合スコア」1本で採点する。
+# 3観点：型（基本の流れ）／本音の引き出し（自然なニーズ発掘）／受注前進。
+_SCORE_RUBRIC = [
+    (5, "卓越（手本）", theme.INDIGO,
+     "そのまま後輩に見せられる商談。型が自然に体に入り、詰問せずお客様の本音を引き出し、"
+     "重点商材まで広げて次の一歩（次アポ・見積）まで確実に前進できています。この型を再現していきましょう。"),
+    (4, "良い（安定合格）", theme.INDIGO,
+     "基本の流れは安定し、本音も要所で拾えて受注に前進できています。あと一歩は、拾ったニーズを"
+     "重点商材へもう一段広げて見積に残すこと。ここを足すと5に届きます。"),
+    (3, "標準（普通にできた）", theme.SUNNY,
+     "型どおりに進められ、大きな崩れはありません。次は“聞けた”で止めず、引き出した本音を提案・"
+     "見積へつなげる一言を足すと、受注前進の手応えが変わります。"),
+    (2, "あと一歩", theme.CORAL,
+     "流れは追えていますが、本音の引き出しか受注前進のどちらかが弱めです。まずは会話の中で"
+     "お客様自身に語らせる質問を1つ増やし、次の約束を必ず取り決めるところから始めましょう。"),
+    (1, "要改善", theme.CORAL,
+     "説明中心で、お客様の背景や本音を掴む前に進んでしまっています。焦らず、暮らし・家族・"
+     "購入経緯を自然に聞くところから。土台の“聞く型”が身につくと一気に伸びます。"),
+]
+
+
+def _score_rubric() -> None:
+    """評価される側（プランナー）向けに、1〜5点の見かたを前向きに示す。"""
+    st.markdown("##### 🎯 総合スコア 1〜5点の見かた（プランナー視点）")
+    st.caption(
+        "各項目は「総合スコア」1本で採点します。**型（基本の流れ）／本音の引き出し（自然な"
+        "ニーズ発掘）／受注前進** の3つをバランスで見た総合評価です。**普通にできて3・平均3.5前後**が目安。"
+    )
+    for score, label, color, desc in _SCORE_RUBRIC:
+        st.markdown(
+            f"""
+            <div class="tk-card" style="text-align:left;border-left:4px solid {color}">
+                <b style="color:{color};font-size:1.05rem">{score}　{label}</b>
+                <p style="margin:.25rem 0 0">{desc}</p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
 
 def evaluation_result(result: EvaluationResult) -> None:
-    """評価結果を表示する：2軸の総合 → 5項目を2軸スコア → 全体講評 → Before/After。"""
+    """評価結果を表示する：総合合計 → 5項目を総合スコア → 全体講評 → Before/After。"""
     full = len(settings.EVALUATION_CRITERIA) * 5
-    ref_axis = settings.AXES_BY_KEY["reference"]
-    sales_axis = settings.AXES_BY_KEY["sales"]
-    c1, c2 = st.columns(2)
-    with c1:
-        st.metric(f"{ref_axis.icon} {ref_axis.title} 合計", f"{result.reference_total} / {full}")
-    with c2:
-        st.metric(f"{sales_axis.icon} {sales_axis.title} 合計", f"{result.sales_total} / {full}")
+    # 総合スコア1本（旧2軸データは sales_score を総合として表示する）。
+    st.metric("🎯 総合スコア 合計", f"{result.overall_total} / {full}")
 
     cols = st.columns(len(settings.EVALUATION_CRITERIA))
     for col, c in zip(cols, settings.EVALUATION_CRITERIA):
         s = result.score_for(c.key)
-        ref_s = s.reference_score if s else 0
         sales_s = s.sales_score if s else 0
-        ref_cmt = s.reference_comment if s else ""
         sales_cmt = s.sales_comment if s else ""
         with col:
             st.markdown(
@@ -175,9 +209,8 @@ def evaluation_result(result: EvaluationResult) -> None:
                 <div class="tk-card">
                     <div class="tk-icon">{c.icon}</div>
                     <h4><span class="tk-num">{c.number}</span> {c.title}</h4>
-                    {_dual_axis_badge(ref_s, sales_s)}
-                    <p><b>{sales_axis.icon}</b> {sales_cmt}</p>
-                    <p style="color:{theme.MUTED};font-size:.82rem"><b>{ref_axis.icon}</b> {ref_cmt}</p>
+                    {_score_badge(sales_s)}
+                    <p>{sales_cmt}</p>
                 </div>
                 """,
                 unsafe_allow_html=True,

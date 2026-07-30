@@ -155,6 +155,11 @@ class EvaluationResult:
         return sum(s.sales_score for s in self.scores)
 
     @property
+    def overall_total(self) -> int:
+        """総合スコアの合計（1軸化後の呼称。sales_total のエイリアス）。"""
+        return self.sales_total
+
+    @property
     def reference_total(self) -> int:
         return sum(s.reference_score for s in self.scores)
 

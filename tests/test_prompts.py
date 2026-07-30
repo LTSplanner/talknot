@@ -33,8 +33,8 @@ def test_prompt_requests_hidden_needs_and_strict_scoring():
     # 隠れたニーズ（秘密領域）の出力フィールド
     for token in ["hidden_needs", "signal", "inferred_need", "surfaced", "秘密領域"]:
         assert token in p
-    # 厳格採点のアンカー（甘い点を付けない方針）
-    for token in ["甘い", "2〜3", "非言語"]:
+    # 採点アンカー（標準の辛さ：普通で3・平均3.5前後、雰囲気だけで加点しない）
+    for token in ["甘い", "3.5", "非言語"]:
         assert token in p
 
 
@@ -44,18 +44,16 @@ def test_prompt_has_two_axis_fields():
         assert token in p
 
 
-def test_prompt_axes_are_differentiated():
-    """2軸が別の物差しで、同点にしないよう指示しているか。"""
+def test_prompt_is_single_axis_with_mirror():
+    """1軸化：総合スコア1本で採点し、reference は sales にミラーする指示があるか。"""
     p = prompts.build_evaluation_prompt()
-    for token in ["別の物差し", "再現度", "本質的な質", "独立に"]:
+    assert "総合スコア" in p
+    assert "2軸別採点は廃止" in p
+    # データ互換のため reference は sales と同じ値をミラーで入れる
+    assert "ミラー" in p
+    # “良い商談”5観点の芯が入っているか
+    for token in ["背景理解", "商材の最大拡張", "受注への前進", "信頼のグリップ", "友好≠信頼"]:
         assert token in p
-
-
-def test_reference_axis_note_changes_with_reference_talk():
-    with_ref = prompts.build_evaluation_prompt(reference_talk="模範です")
-    without = prompts.build_evaluation_prompt()
-    assert "再現できたか" in with_ref       # 登録模範トークの再現度
-    assert "基本の型" in without            # 未登録時は基本の型が基準
 
 
 def test_prompt_uses_sales_persona():
