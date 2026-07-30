@@ -59,6 +59,38 @@ python scripts/send_roleplay_reminders.py --dry-run     # 未実施者と本文�
 
 ---
 
+## ✅ 今回の方針：個別DM経路（管理者チェックリスト）
+
+各プランナーの Google Chat に **bot から個別DM** で、
+「今日ロープレ未実施の人へ・平日15:00・休みの人は除外」してリマインドします。上から順に。
+
+**① GCPプロジェクト `eigyou-ro-pure`（オーナー権限：例 hkumada@）**
+- [ ] Chat API / Admin SDK API を有効化（Calendar API は有効化済み）
+- [ ] Chat用の**最小権限SA `knote-chat`** を作成し、鍵(JSON)を発行
+      （↑「🤖 Claude Codeが代行できる」のコマンドでOK）
+
+**② Google Workspace 管理者（admin.google.com）※ここがWorkspace管理者必須**
+- [ ] ドメイン全体の委任に **`knote-chat` SAのクライアントID** を登録＋スコープ許可（→ C）：
+      `https://www.googleapis.com/auth/chat.bot`
+      `https://www.googleapis.com/auth/admin.directory.user.readonly`
+- [ ] **既存の録画用DWD SA** に カレンダーのスコープを追加（枠作成＋休み判定用）（→ C）：
+      `https://www.googleapis.com/auth/calendar.events`
+      `https://www.googleapis.com/auth/calendar.readonly`
+- [ ] **Google Chat API →「構成」**でアプリ作成（→ A）：アプリ名/アバター、
+      **「1対1メッセージ」を有効**、**組織内に公開**、上の `knote-chat` SAを紐付け。
+      組織ポリシーで **botからのDMを許可**。
+
+**③ GitHub Secrets（リポジトリ `LTSplanner/talknot` → Settings → Secrets → Actions）**
+- [ ] `CHAT_SA_JSON` … `knote-chat` の鍵JSON
+- [ ] `CHAT_ADMIN_SUBJECT` … Directoryを読める管理者メール（例 `hkumada@life-time-support.com`）
+- [ ] `CALENDAR_SA_JSON` … 録画用DWD SAの鍵JSON（枠作成＋休み判定用）
+- [ ]（`KNOWLEDGE_SHEET_ID` / `KNOWLEDGE_SA_JSON` は登録済み）
+
+**④ テスト**：Actions → `roleplay-reminder` → **Run workflow** で手動実行。以降は平日15:00に自動送信。
+カレンダー枠は `python scripts/setup_roleplay_calendar.py`（まず `--dry-run`）で各人に作成。
+
+---
+
 ## 全体像（どの鍵が何に使われるか）
 
 | 用途 | 認証 | スコープ | 使う env |
