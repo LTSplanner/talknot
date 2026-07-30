@@ -112,6 +112,28 @@ def _johari_meter(j) -> None:
         st.info(j.comment)
 
 
+def _customer_profile(profile) -> None:
+    """お客様の攻略メモ（属性タグ・人物像・次回の攻め方）を表示する。"""
+    if not profile:
+        return
+    st.markdown("##### 🧭 このお客様の攻略メモ（次回の活かし方）")
+    if profile.attributes:
+        pills = "".join(
+            f'<span style="display:inline-block;background:{theme.INDIGO}14;'
+            f'color:{theme.INDIGO};border:1px solid {theme.INDIGO}33;'
+            f'border-radius:999px;padding:.2rem .7rem;margin:.15rem .3rem .15rem 0;'
+            f'font-size:.82rem;font-weight:600">{a}</span>'
+            for a in profile.attributes
+        )
+        st.markdown(
+            f'<div style="margin:.3rem 0 .5rem">{pills}</div>', unsafe_allow_html=True
+        )
+    if profile.summary:
+        st.markdown(profile.summary)
+    if profile.next_approach:
+        st.info(f"🎯 次回の攻め方：{profile.next_approach}")
+
+
 def criteria_overview() -> None:
     """5つの評価項目をカードで一覧表示する。"""
     cols = st.columns(len(settings.EVALUATION_CRITERIA))
@@ -183,6 +205,8 @@ def evaluation_result(result: EvaluationResult) -> None:
     if result.summary:
         st.markdown("##### 全体の振り返り")
         st.success(result.summary)
+
+    _customer_profile(result.customer_profile)
 
     if result.feedback:
         st.markdown("##### シーン別フィードバック（Before → After）")

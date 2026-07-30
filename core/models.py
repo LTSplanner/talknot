@@ -114,6 +114,18 @@ class HiddenNeed:
 
 
 @dataclass
+class CustomerProfile:
+    """トーク全体から読み取ったお客様の『攻略メモ』（次回の活かし方）。
+
+    決めつけではなく“傾向”として、意思決定・話し方の好みと、次回どう提案すると
+    響くかをまとめる。過去データには無いため EvaluationResult では任意項目。
+    """
+    attributes: list[str] = field(default_factory=list)  # 特徴タグ（せっかち/慎重 等）1〜4個
+    summary: str = ""        # 人物像の要約（意思決定・話し方の傾向）
+    next_approach: str = ""  # 次回このお客様にどう提案すると響くか（効く言い回し・順番・避けること）
+
+
+@dataclass
 class TimestampedFeedback:
     """『動画の何分何秒のトーク』単位の Before/After フィードバック。"""
     timestamp: str          # "MM:SS"
@@ -131,6 +143,7 @@ class EvaluationResult:
     feedback: list[TimestampedFeedback] = field(default_factory=list)
     summary: str = ""        # 全体講評（ポジティブな振り返り）
     knowledge: list[KnowledgeItem] = field(default_factory=list)  # 抽出した弊社ナレッジ
+    customer_profile: "CustomerProfile | None" = None  # お客様の攻略メモ（次回の活かし方）
 
     @property
     def total(self) -> int:
@@ -195,6 +208,21 @@ class EvaluationResult:
                 comment=j.get("comment", ""),
             )
 
+        customer_profile = None
+        cp = data.get("customer_profile")
+        if isinstance(cp, dict):
+            raw_attrs = cp.get("attributes")
+            attrs = (
+                [str(a) for a in raw_attrs if str(a).strip()]
+                if isinstance(raw_attrs, list)
+                else []
+            )
+            customer_profile = CustomerProfile(
+                attributes=attrs,
+                summary=cp.get("summary") or "",
+                next_approach=cp.get("next_approach") or "",
+            )
+
         return cls(
             scores=[cls._parse_score(s) for s in data.get("scores", [])],
             johari=johari,
@@ -228,6 +256,7 @@ class EvaluationResult:
                 for k in data.get("knowledge", [])
                 if k.get("point")
             ],
+            customer_profile=customer_profile,
         )
 
     def to_dict(self) -> dict:
@@ -238,4 +267,5 @@ class EvaluationResult:
             "feedback": [vars(f) for f in self.feedback],
             "summary": self.summary,
             "knowledge": [vars(k) for k in self.knowledge],
+            "customer_profile": vars(self.customer_profile) if self.customer_profile else None,
         }

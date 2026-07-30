@@ -128,3 +128,39 @@ def test_knowledge_parsed_and_roundtrips():
     assert r.knowledge[0].category == "product"
     again = EvaluationResult.from_dict(r.to_dict())
     assert again.knowledge[0].point == "ZEH仕様は補助金対象"
+
+
+def test_customer_profile_parsed_and_roundtrips():
+    data = dict(SAMPLE)
+    data["customer_profile"] = {
+        "attributes": ["慎重", "価格重視", "家族相談型"],
+        "summary": "即決はせず持ち帰って家族に相談するタイプ。",
+        "next_approach": "根拠を先に示し、比較しやすい形で提案する。",
+    }
+    r = EvaluationResult.from_dict(data)
+    assert r.customer_profile is not None
+    assert r.customer_profile.attributes == ["慎重", "価格重視", "家族相談型"]
+    assert r.customer_profile.summary.startswith("即決")
+    again = EvaluationResult.from_dict(r.to_dict())
+    assert again.customer_profile.attributes == ["慎重", "価格重視", "家族相談型"]
+    assert again.customer_profile.next_approach.startswith("根拠")
+
+
+def test_customer_profile_absent_is_none():
+    """過去データ（customer_profile 無し）でも None で後方互換に読める。"""
+    assert EvaluationResult.from_dict({}).customer_profile is None
+    assert EvaluationResult.from_dict(SAMPLE).customer_profile is None
+    # round-trip でも None のまま保たれる
+    assert EvaluationResult.from_dict(
+        EvaluationResult.from_dict(SAMPLE).to_dict()
+    ).customer_profile is None
+
+
+def test_customer_profile_normalizes_bad_attributes():
+    """attributes が非list・str項目欠損でも落ちず正規化される。"""
+    r = EvaluationResult.from_dict(
+        {"customer_profile": {"attributes": "せっかち"}}  # 非list
+    )
+    assert r.customer_profile.attributes == []
+    assert r.customer_profile.summary == ""
+    assert r.customer_profile.next_approach == ""
