@@ -7,7 +7,6 @@ core.models.EvaluationResult として返す。
 from __future__ import annotations
 
 import json
-import os
 import re
 import subprocess
 import time
@@ -52,27 +51,38 @@ def _loads_lenient(text: str) -> dict:
         raise
 
 
-def _extract_audio(src: str) -> tuple[str, bool]:
-    """動画から音声(mono/16kHz/低ビットレートmp3)を抽出して (path, True) を返す。
+# 長尺動画でトークン（無料枠）を使い切らないよう、総フレーム数の目安をこの値に抑える。
+_TARGET_FRAMES = 1600
+_FPS_MIN, _FPS_MAX = 0.15, 0.5
 
-    商談評価が見るのは声のトーン・間・発話比率・感情＋話の中身で、これらは音声に含まれる。
-    映像フレームを送らないことでトークンを大幅に削減し、長尺でも無料枠に当たりにくくする。
-    ffmpeg が使えない等で失敗したら、元ファイルをそのまま使う (src, False)。
-    """
+
+def _probe_duration_sec(path: str) -> float | None:
+    """動画の長さ(秒)を ffmpeg で調べる。取れなければ None。"""
     try:
         import imageio_ffmpeg
 
         ff = imageio_ffmpeg.get_ffmpeg_exe()
-        out = src + ".mono16k.mp3"
-        subprocess.run(
-            [ff, "-y", "-i", src, "-vn", "-ac", "1", "-ar", "16000", "-b:a", "48k", out],
-            check=True, capture_output=True, timeout=900,
-        )
-        if os.path.exists(out) and os.path.getsize(out) > 0:
-            return out, True
-    except Exception:  # noqa: BLE001 抽出失敗時は元ファイルにフォールバック
+        r = subprocess.run([ff, "-i", path], capture_output=True, text=True, timeout=120)
+        m = re.search(r"Duration:\s*(\d+):(\d+):(\d+)", r.stderr or "")
+        if m:
+            h, mn, s = (int(x) for x in m.groups())
+            return float(h * 3600 + mn * 60 + s)
+    except Exception:  # noqa: BLE001
         pass
-    return src, False
+    return None
+
+
+def _target_fps(path: str) -> float:
+    """動画の長さに応じたフレーム取得fpsを返す（短い商談は密に、長尺は間引く）。
+
+    総フレーム数が _TARGET_FRAMES 程度になるよう fps を決め、0.15〜0.5 にクランプする。
+    長さが取れない場合は既定 GEMINI_VIDEO_FPS。表情の変化は数秒単位なので、fpsを
+    下げても表情・身振りは十分読める（映像は捨てない）。
+    """
+    dur = _probe_duration_sec(path)
+    if not dur or dur <= 0:
+        return settings.GEMINI_VIDEO_FPS
+    return max(_FPS_MIN, min(_FPS_MAX, _TARGET_FRAMES / dur))
 
 
 # 429（無料枠のレート上限）で待って再試行する秒数。分あたり上限は待てば復旧する。
@@ -121,16 +131,17 @@ def _wait_until_active(client: genai.Client, file):
     return file
 
 
-def _media_part(uploaded):
+def _media_part(uploaded, fps: float | None = None):
     """動画は低fpsでフレームを間引いた Part にし、音声などはそのまま渡す。
 
-    身振り手振りは残しつつトークンを抑え、2〜3時間の長尺でも文脈上限に収まりやすくする。
+    身振り手振り・表情は残しつつトークンを抑え、2〜3時間の長尺でも上限に収まりやすくする。
+    fps 未指定なら既定 GEMINI_VIDEO_FPS。
     """
     mime = getattr(uploaded, "mime_type", "") or ""
     if mime.startswith("video/"):
         return types.Part(
             file_data=types.FileData(file_uri=uploaded.uri, mime_type=mime),
-            video_metadata=types.VideoMetadata(fps=settings.GEMINI_VIDEO_FPS),
+            video_metadata=types.VideoMetadata(fps=fps or settings.GEMINI_VIDEO_FPS),
         )
     return uploaded
 
@@ -143,38 +154,34 @@ def analyze(
     """動画/音声ファイルを解析し EvaluationResult を返す。"""
     client = _client()
 
-    # 映像を捨てて「音声のみ」をアップロード（トークン激減で長尺・無料枠対策。品質は維持）。
-    # 抽出に失敗したら元の動画をそのまま使う（フォールバック）。
-    audio_path, is_tmp = _extract_audio(video_path)
-    uploaded = client.files.upload(file=audio_path)
+    # 映像は残す（表情など非言語も評価に使う）。長尺は動画の長さから fps を自動計算して
+    # フレームを間引き、表情の変化は追えるままトークン（＝無料枠）消費を抑える。
+    fps = _target_fps(video_path)
+    uploaded = client.files.upload(file=video_path)
     uploaded = _wait_until_active(client, uploaded)
 
     prompt = prompts.build_evaluation_prompt(reference_talk, knowledge_base)
 
     cfg = types.GenerateContentConfig(
         response_mime_type="application/json",
-        # フォールバックで動画を送る場合に備え低解像度を指定（音声時は無視される）。
+        # 映像解像度は下げてトークンを節約（表情・身振りは十分読める）。
         media_resolution=types.MediaResolution.MEDIA_RESOLUTION_LOW,
         max_output_tokens=_MAX_OUTPUT_TOKENS,
     )
     try:
-        resp = _generate_retrying(client, [_media_part(uploaded), prompt], cfg)
+        resp = _generate_retrying(client, [_media_part(uploaded, fps), prompt], cfg)
         data = _loads_lenient(resp.text)
     except json.JSONDecodeError:
         # 途中切断/不正JSONのことがあるため、JSON厳守を促して1回だけ再試行する。
-        resp = _generate_retrying(client, [_media_part(uploaded), prompt + _STRICT_JSON], cfg)
+        resp = _generate_retrying(
+            client, [_media_part(uploaded, fps), prompt + _STRICT_JSON], cfg)
         data = _loads_lenient(resp.text)
     finally:
-        # 解析後はアップロード済みファイルと一時音声を後始末（失敗しても致命的ではない）
+        # 解析後はアップロード済みファイルを後始末（失敗しても致命的ではない）
         try:
             client.files.delete(name=uploaded.name)
         except Exception:
             pass
-        if is_tmp:
-            try:
-                os.remove(audio_path)
-            except OSError:
-                pass
 
     return EvaluationResult.from_dict(data)
 
