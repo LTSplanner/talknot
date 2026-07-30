@@ -28,6 +28,18 @@ def _ja_johari(text: str) -> str:
     return text
 
 
+# 発言先頭の話者名接頭辞（例「安葉実沙:「…」」の "安葉実沙:"）を除去するための正規表現。
+# 「」で始まる引用の直前にある短い "名前:" のみを対象にし、誤除去を避ける。
+_SPEAKER_PREFIX = re.compile(r"^\s*[^「」\n]{1,16}[:：]\s*(?=「)")
+
+
+def _strip_speaker(text: str) -> str:
+    """before/after の先頭に付いた話者名（『◯◯:』）を取り除く。"""
+    if not text:
+        return text
+    return _SPEAKER_PREFIX.sub("", text, count=1)
+
+
 def _deep_ja_johari(obj):
     """dict/list を再帰的にたどり、文字列値のジョハリ英語表記を日本語へ置換する。"""
     if isinstance(obj, str):
@@ -202,8 +214,8 @@ class EvaluationResult:
                     timestamp=f.get("timestamp", ""),
                     criterion_key=f.get("criterion_key", ""),
                     emotion_note=f.get("emotion_note", ""),
-                    before=f.get("before", ""),
-                    after=f.get("after", ""),
+                    before=_strip_speaker(f.get("before", "")),
+                    after=_strip_speaker(f.get("after", "")),
                 )
                 for f in data.get("feedback", [])
             ],
