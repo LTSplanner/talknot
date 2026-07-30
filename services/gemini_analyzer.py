@@ -7,7 +7,9 @@ core.models.EvaluationResult として返す。
 from __future__ import annotations
 
 import json
+import os
 import re
+import subprocess
 import time
 
 from google import genai
@@ -48,6 +50,55 @@ def _loads_lenient(text: str) -> dict:
         if i != -1 and j > i:
             return json.loads(s[i:j + 1])
         raise
+
+
+def _extract_audio(src: str) -> tuple[str, bool]:
+    """動画から音声(mono/16kHz/低ビットレートmp3)を抽出して (path, True) を返す。
+
+    商談評価が見るのは声のトーン・間・発話比率・感情＋話の中身で、これらは音声に含まれる。
+    映像フレームを送らないことでトークンを大幅に削減し、長尺でも無料枠に当たりにくくする。
+    ffmpeg が使えない等で失敗したら、元ファイルをそのまま使う (src, False)。
+    """
+    try:
+        import imageio_ffmpeg
+
+        ff = imageio_ffmpeg.get_ffmpeg_exe()
+        out = src + ".mono16k.mp3"
+        subprocess.run(
+            [ff, "-y", "-i", src, "-vn", "-ac", "1", "-ar", "16000", "-b:a", "48k", out],
+            check=True, capture_output=True, timeout=900,
+        )
+        if os.path.exists(out) and os.path.getsize(out) > 0:
+            return out, True
+    except Exception:  # noqa: BLE001 抽出失敗時は元ファイルにフォールバック
+        pass
+    return src, False
+
+
+# 429（無料枠のレート上限）で待って再試行する秒数。分あたり上限は待てば復旧する。
+_RATE_LIMIT_WAITS = [30, 60]
+
+
+def _is_rate_limit(exc: Exception) -> bool:
+    s = str(exc).lower()
+    return any(k in s for k in ("429", "resource_exhausted", "resourceexhausted",
+                                "quota", "rate limit", "rate_limit"))
+
+
+def _generate_retrying(client: genai.Client, contents: list, cfg):
+    """generate_content を実行。429 のときだけ待って再試行する（他エラーは即送出）。"""
+    last: Exception | None = None
+    for wait in [0, *_RATE_LIMIT_WAITS]:
+        if wait:
+            time.sleep(wait)
+        try:
+            return client.models.generate_content(
+                model=settings.GEMINI_MODEL, contents=contents, config=cfg)
+        except Exception as e:  # noqa: BLE001
+            last = e
+            if not _is_rate_limit(e):
+                raise
+    raise last  # type: ignore[misc]
 
 
 def _client() -> genai.Client:
@@ -92,34 +143,38 @@ def analyze(
     """動画/音声ファイルを解析し EvaluationResult を返す。"""
     client = _client()
 
-    uploaded = client.files.upload(file=video_path)
+    # 映像を捨てて「音声のみ」をアップロード（トークン激減で長尺・無料枠対策。品質は維持）。
+    # 抽出に失敗したら元の動画をそのまま使う（フォールバック）。
+    audio_path, is_tmp = _extract_audio(video_path)
+    uploaded = client.files.upload(file=audio_path)
     uploaded = _wait_until_active(client, uploaded)
 
     prompt = prompts.build_evaluation_prompt(reference_talk, knowledge_base)
 
     cfg = types.GenerateContentConfig(
         response_mime_type="application/json",
-        # 動画は声・間が読めれば十分。映像解像度を下げてトークン消費を大幅削減し、
-        # 長尺の商談録画でも上限/無料枠に当たりにくくする（軽量化重視）。
+        # フォールバックで動画を送る場合に備え低解像度を指定（音声時は無視される）。
         media_resolution=types.MediaResolution.MEDIA_RESOLUTION_LOW,
         max_output_tokens=_MAX_OUTPUT_TOKENS,
     )
     try:
-        resp = client.models.generate_content(
-            model=settings.GEMINI_MODEL, contents=[_media_part(uploaded), prompt], config=cfg)
+        resp = _generate_retrying(client, [_media_part(uploaded), prompt], cfg)
         data = _loads_lenient(resp.text)
     except json.JSONDecodeError:
         # 途中切断/不正JSONのことがあるため、JSON厳守を促して1回だけ再試行する。
-        resp = client.models.generate_content(
-            model=settings.GEMINI_MODEL,
-            contents=[_media_part(uploaded), prompt + _STRICT_JSON], config=cfg)
+        resp = _generate_retrying(client, [_media_part(uploaded), prompt + _STRICT_JSON], cfg)
         data = _loads_lenient(resp.text)
     finally:
-        # 解析後はアップロード済みファイルを後始末（失敗しても致命的ではない）
+        # 解析後はアップロード済みファイルと一時音声を後始末（失敗しても致命的ではない）
         try:
             client.files.delete(name=uploaded.name)
         except Exception:
             pass
+        if is_tmp:
+            try:
+                os.remove(audio_path)
+            except OSError:
+                pass
 
     return EvaluationResult.from_dict(data)
 
@@ -154,12 +209,10 @@ def analyze_roleplay(
         max_output_tokens=_MAX_OUTPUT_TOKENS,
     )
     try:
-        resp = client.models.generate_content(
-            model=settings.GEMINI_MODEL, contents=contents, config=cfg)
+        resp = _generate_retrying(client, contents, cfg)
         data = _loads_lenient(resp.text)
     except json.JSONDecodeError:
-        resp = client.models.generate_content(
-            model=settings.GEMINI_MODEL, contents=contents + [_STRICT_JSON], config=cfg)
+        resp = _generate_retrying(client, contents + [_STRICT_JSON], cfg)
         data = _loads_lenient(resp.text)
     return EvaluationResult.from_dict(data)
 
