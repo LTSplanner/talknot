@@ -242,3 +242,17 @@ Chat の env が未設定なら、通常実行でも送信せず警告して終�
   **全員（未実施者）に送ります**（安全側。誤って全員無送信にはしません）。
 - GitHub Actions で使うには Secret `CALENDAR_SA_JSON` を登録します
   （`.github/workflows/roleplay-reminder.yml` の env に設定済み。無ければ休み判定はスキップ）。
+
+---
+
+## G. 評価エラーの管理者通知（Google Chat 個人DM）
+
+評価（商談/ロープレ）が失敗したとき、`ERROR_NOTIFY_EMAIL`（既定 `hkumada@life-time-support.com`）へ
+Google Chat の**個人DM**で通知します（実施者・対象・エラー内容）。
+
+- 送信には Chat の DM 設定（`CHAT_SA_JSON` + `CHAT_ADMIN_SUBJECT`）が必要です。
+  これは **リマインドと違いアプリ(Streamlit)側で送る**ため、**Streamlit の Secrets にも**
+  `CHAT_SA_JSON` / `CHAT_ADMIN_SUBJECT` を設定してください（GitHub Secretsとは別）。
+- 未設定なら通知は**静かにスキップ**（評価処理は通常どおり継続）。
+- Webhook(`CHAT_WEBHOOK_URL`)しか無い場合は、そのスペースへ素の本文で投稿します（DMではない）。
+- 宛先を変えるには env `ERROR_NOTIFY_EMAIL` を設定。空にすると通知しません。

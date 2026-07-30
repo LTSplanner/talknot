@@ -1225,15 +1225,32 @@ def finish_evaluation(
 def fail_evaluation(
     user_email: str, job_id: str, error: str, label: str = ""
 ) -> None:
-    """背景解析の失敗時に、同じレコードを『失敗』へ更新する。"""
+    """背景解析の失敗時に、同じレコードを『失敗』へ更新し、管理者へ通知する。"""
     if _use_eval_sheets():
         _sheet_upsert_eval(_eval_record(user_email, job_id, "error", label, error=error))
-        return
-    _write_eval(_eval_handle(user_email, job_id), {
-        "user_email": user_email, "label": label,
-        "saved_at": _now_jst_str(),
-        "status": "error", "error": error, "result": None,
-    })
+    else:
+        _write_eval(_eval_handle(user_email, job_id), {
+            "user_email": user_email, "label": label,
+            "saved_at": _now_jst_str(),
+            "status": "error", "error": error, "result": None,
+        })
+    _notify_admin_error(user_email, label, error)
+
+
+def _notify_admin_error(user_email: str, label: str, error: str) -> None:
+    """評価失敗を管理者へ Google Chat の個人DMで通知する（設定時のみ・失敗は無視）。"""
+    try:
+        admin = getattr(settings, "ERROR_NOTIFY_EMAIL", "")
+        if not admin:
+            return
+        from services import google_chat
+        who = (user_email or "").split("@")[0]
+        text = ("⚠️ KNOTE 評価エラー\n"
+                f"実施者: {who}\n対象: {label}\nエラー: {error}\n"
+                "→ 評価履歴タブで確認してください。")
+        google_chat.notify_admin(admin, text)
+    except Exception:  # noqa: BLE001 通知失敗で本体を止めない
+        pass
 
 
 # 『処理中』のまま残った（再起動でスレッドが死んだ等）レコードを、この分数を超えたら

@@ -58,6 +58,10 @@ VIEWER_EMAILS = _csv_env(
     ),
 )
 
+# 評価がエラーになったとき、Google Chat の個人DMで通知する宛先（空なら通知しない）。
+# 送信には Chat の設定（CHAT_SA_JSON 等）がアプリ側にも必要。未設定なら静かにスキップ。
+ERROR_NOTIFY_EMAIL = os.getenv("ERROR_NOTIFY_EMAIL", "hkumada@life-time-support.com")
+
 # --- 同時実行の制御（無料枠のメモリ保護）---
 # 同時に走らせる動画解析の最大数。無料枠（RAM 約1GB）では 1 が安全。
 # 余裕のあるホストに移したら増やせる（環境変数 MAX_CONCURRENT_ANALYSES）。

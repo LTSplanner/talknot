@@ -177,3 +177,22 @@ def notify(email_to_text: dict[str, str]) -> dict:
     # 未設定：送らずスキップ。
     result["skipped"] = True
     return result
+
+
+def notify_admin(user_email: str, text: str) -> bool:
+    """管理者1名へ通知する（DM経路優先／Webhookがあればそこへ素の本文で投稿）。
+
+    リマインドと違い定型ヘッダは付けない（エラー通知等の任意用途向け）。
+    未設定なら何もしない。例外は投げず、送れたら True を返す。
+    """
+    try:
+        mode = _mode()
+        if mode == "dm":
+            _send_dm(user_email, text)
+            return True
+        if mode == "webhook":
+            _post_webhook(text)
+            return True
+    except Exception:  # noqa: BLE001 通知失敗で本体を止めない
+        pass
+    return False
