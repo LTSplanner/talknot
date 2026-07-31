@@ -1,21 +1,19 @@
 name: roleplay-reminder
 
-# 平日15:00(JST) に「本日ロープレ未実施の人」へ個人Chat DM（またはWebhook投稿）を送る。
+# 平日12:00(JST) に「午前中ロープレ未実施の人」へ個人Chat DMを送る。
 # 必要な GitHub Secrets:
 #   KNOWLEDGE_SHEET_ID  … 評価履歴シートのID（当日実施の判定に使う）
 #   KNOWLEDGE_SA_JSON   … 評価履歴シートを読む知識SAの鍵JSON
 #   個人DM経路を使う場合（推奨）:
 #     CHAT_SA_JSON        … Chatアプリ用SAの鍵JSON（最小権限の専用SAを推奨）
 #     CHAT_ADMIN_SUBJECT  … Directory API 用に impersonate する管理者メール
-#   もしくはWebhook経路（簡易）:
-#     CHAT_WEBHOOK_URL    … 通知先スペースの Incoming Webhook URL
 #   休みスキップ（任意・あれば使う）:
 #     CALENDAR_SA_JSON    … カレンダー読み取り用DWD SAの鍵JSON（無ければ休み判定はスキップ）
 # 未設定でもスクリプトは exit 0 で静かに終わる（Actions を赤くしない方針）。
 
 on:
   schedule:
-    - cron: "0 6 * * 1-5"   # 06:00 UTC = 15:00 JST の平日(月〜金)
+    - cron: "0 3 * * 1-5"   # 03:00 UTC = 12:00 JST の平日(月〜金)
   workflow_dispatch:          # 手動実行も可
 
 concurrency:
@@ -44,7 +42,6 @@ jobs:
           KNOWLEDGE_SA_JSON: ${{ secrets.KNOWLEDGE_SA_JSON }}
           CHAT_SA_JSON: ${{ secrets.CHAT_SA_JSON }}
           CHAT_ADMIN_SUBJECT: ${{ secrets.CHAT_ADMIN_SUBJECT }}
-          CHAT_WEBHOOK_URL: ${{ secrets.CHAT_WEBHOOK_URL }}
           # 休みスキップ（任意）：あれば当日「休み」の人には送らない。無ければ全員に送る。
           CALENDAR_SA_JSON: ${{ secrets.CALENDAR_SA_JSON }}
         # 失敗しても通知を鳴らさない（スクリプト自体も exit 0 方針だが二重で保険）。

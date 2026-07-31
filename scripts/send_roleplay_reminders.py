@@ -1,9 +1,9 @@
-"""当日ロープレ未実施の対象者へ、前向きなリマインドを送る（平日15:00・JST）。
+"""午前中ロープレ未実施の対象者へ、前向きなリマインドを送る（平日12:00・JST）。
 
 流れ:
   1. sheets_knowledge.load_evaluations() で評価レコードを読む。
-  2. core.reminders.missed_today() で当日ロープレ未実施の対象者を出す。
-  3. services.google_chat.notify() で各人へDM（またはWebhookでまとめ投稿）。
+  2. core.reminders.missed_before() で午前中ロープレ未実施の対象者を出す。
+  3. services.google_chat.notify_individually() で各人へ個別DM。
 
 方針:
   - 送信設定（Chat）や履歴設定（Knowledgeシート）が無い場合は送らず、
@@ -12,7 +12,8 @@
   - どんな例外でもプロセスを落とさない（最後は exit 0）。
 
 storage 実行 env: KNOWLEDGE_SHEET_ID, KNOWLEDGE_SA_JSON か KNOWLEDGE_SA_FILE。
-送信 env（いずれか）: CHAT_SA_JSON/CHAT_SA_FILE + CHAT_ADMIN_SUBJECT、または CHAT_WEBHOOK_URL。
+送信 env: CHAT_SA_JSON/CHAT_SA_FILE + CHAT_ADMIN_SUBJECT。
+ロープレ通知は個別DM専用とし、Webhookのグループ投稿には切り替えない。
 """
 from __future__ import annotations
 
@@ -26,6 +27,7 @@ from core import reminders
 from services import google_calendar, google_chat, sheets_knowledge
 
 _APP_URL = "https://talknot-lts.streamlit.app"
+_MORNING_CUTOFF = "12:00:00"
 
 
 def _calendar_sa_info() -> dict | None:
@@ -63,7 +65,7 @@ def _filter_out_dayoff(
         off = False
         try:
             events = google_calendar.list_events_on(today, email, sa_info)
-            off = reminders.is_off_today(events)
+            off = reminders.is_off_morning(events)
         except Exception as e:  # noqa: BLE001 取得失敗は通常送信に倒す
             print(f"  休み判定に失敗（通常どおり送信）: {email}: {str(e)[:120]}")
             off = False
@@ -79,14 +81,14 @@ def _name_of(email: str) -> str:
 def _message_for(email: str) -> str:
     """前向き＆短いリマインド本文（＋アプリURL）。"""
     return (
-        f"🎙️ {_name_of(email)}さん、今日のロープレはまだ1本残っています。\n"
-        "5分でOK、続けた分だけ商談が変わります。今からサッと1本いきましょう！\n"
+        f"🎙️ {_name_of(email)}さん、午前中のKNOTEロープレがまだ完了していません。\n"
+        "5分でOKです。午後のスタート前に、サッと1本いきましょう！\n"
         f"{_APP_URL}"
     )
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="当日ロープレ未実施者へリマインド")
+    parser = argparse.ArgumentParser(description="午前中ロープレ未実施者へリマインド")
     parser.add_argument("--dry-run", action="store_true", help="送信せず対象と本文を表示")
     args = parser.parse_args()
 
@@ -105,8 +107,8 @@ def main() -> int:
         print("評価履歴の読み込みに失敗。送信せず終了:", str(e)[:160])
         return 0
 
-    missed = reminders.missed_today(records, targets, today)
-    print(f"当日ロープレ未実施: {len(missed)} 名")
+    missed = reminders.missed_before(records, targets, today, _MORNING_CUTOFF)
+    print(f"午前中ロープレ未実施: {len(missed)} 名")
     for email in missed:
         print(f"  - {email}")
 
@@ -136,11 +138,11 @@ def main() -> int:
             print(text)
         return 0
 
-    if not google_chat.configured():
-        print("Chat送信が未設定（CHAT_SA_* / CHAT_ADMIN_SUBJECT か CHAT_WEBHOOK_URL）。送信せず終了。")
+    if not google_chat.dm_configured():
+        print("個人DMが未設定（CHAT_SA_* / CHAT_ADMIN_SUBJECT）。グループ投稿へ切り替えず終了。")
         return 0
 
-    result = google_chat.notify(email_to_text)
+    result = google_chat.notify_individually(email_to_text)
     if result.get("skipped"):
         print("送信経路なしのためスキップ。")
         return 0

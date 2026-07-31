@@ -80,6 +80,37 @@ class TestMissedToday:
 
 
 # --------------------------------------------------------------------------- #
+# missed_before（午前中の締切判定）
+# --------------------------------------------------------------------------- #
+class TestMissedBefore:
+    def test_roleplay_before_noon_counts_as_done(self):
+        recs = [_rec("a@x.com", "2026-07-27 11:59:59")]
+        assert reminders.missed_before(
+            recs, ["a@x.com"], "2026-07-27", "12:00:00"
+        ) == []
+
+    def test_roleplay_at_noon_is_too_late(self):
+        recs = [_rec("a@x.com", "2026-07-27 12:00:00")]
+        assert reminders.missed_before(
+            recs, ["a@x.com"], "2026-07-27", "12:00:00"
+        ) == ["a@x.com"]
+
+    def test_afternoon_roleplay_does_not_count_for_morning(self):
+        recs = [_rec("a@x.com", "2026-07-27 15:00:00")]
+        assert reminders.missed_before(
+            recs, ["a@x.com"], "2026-07-27", "12:00:00"
+        ) == ["a@x.com"]
+
+    def test_non_roleplay_before_noon_does_not_count(self):
+        recs = [_rec(
+            "a@x.com", "2026-07-27 10:00:00", label="📊 商談評価 L2607"
+        )]
+        assert reminders.missed_before(
+            recs, ["a@x.com"], "2026-07-27", "12:00:00"
+        ) == ["a@x.com"]
+
+
+# --------------------------------------------------------------------------- #
 # is_off_today（休みスキップ判定：タイトル語・終日/時間指定を問わない）
 # --------------------------------------------------------------------------- #
 def _ev(title, all_day=False):
@@ -128,6 +159,25 @@ class TestIsOffToday:
 
     def test_empty_events_is_not_off(self):
         assert not reminders.is_off_today([])
+
+
+# --------------------------------------------------------------------------- #
+# is_off_morning（正午通知で午前休を除外）
+# --------------------------------------------------------------------------- #
+class TestIsOffMorning:
+    def test_morning_leave_is_off(self):
+        assert reminders.is_off_morning([_ev("午前休 09:00〜13:00")])
+        assert reminders.is_off_morning([_ev("AM半休")])
+
+    def test_afternoon_leave_is_not_off(self):
+        assert not reminders.is_off_morning([_ev("午後休（有給）")])
+        assert not reminders.is_off_morning([_ev("PM半休")])
+
+    def test_full_day_leave_is_off(self):
+        assert reminders.is_off_morning([_ev("有給休暇", all_day=True)])
+
+    def test_generic_halfday_remains_send_target(self):
+        assert not reminders.is_off_morning([_ev("半休")])
 
 
 # --------------------------------------------------------------------------- #

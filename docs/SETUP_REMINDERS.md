@@ -4,8 +4,8 @@ KNOTE に、ロープレを毎日の習慣にするための2つの仕組みを�
 
 1. **カレンダー枠固定** … 各対象者のカレンダーに「KNOTEロープレ（5分）」を
    平日13:00 の繰り返し予定として自動で入れる。
-2. **未実施リマインド** … 平日15:00 時点でその日ロープレ未実施の人へ、Google Chat の
-   個人DM（または指定スペースへのまとめ投稿）で前向きに声かけする。
+2. **未実施リマインド** … 平日12:00 時点で午前中にロープレ未実施の人へ、Google Chat の
+   個人DMで前向きに声かけする。
 
 > ⚠️ この2つは **Google Workspace 管理者の設定** が必要です。設定が無い間は、
 > スクリプト・ワークフローは何も送らず静かに終了します（CI を赤くしません）。
@@ -19,7 +19,6 @@ KNOTE に、ロープレを毎日の習慣にするための2つの仕組みを�
 **🧑 人がブラウザで行う（Claude Code では実行できない・GUI操作）**
 - Google 管理コンソールでの「ドメイン全体の委任」スコープ追加（→ C）
 - Google Chat API の「構成（アプリ設定）」と組織公開（→ A-2, A-5）
-- Chat スペース作成 ＋ Incoming Webhook 発行（→ B）
 
 これらは `admin.google.com` / Google Chat の GUI 操作で、CLI/API では実質行えません。
 
@@ -43,8 +42,6 @@ gh secret set KNOWLEDGE_SA_JSON  < knowledge-sa.json
 #   個人DM経路:
 gh secret set CHAT_SA_JSON        < knote-chat.json
 gh secret set CHAT_ADMIN_SUBJECT  --body "<Directoryを読める管理者メール>"
-#   かんたんWebhook経路（DMの代わり）:
-gh secret set CHAT_WEBHOOK_URL    --body "<スペースのWebhook URL>"
 
 # 4) カレンダー枠作成・リマインドの動作確認（送らない/書かない）
 export GOOGLE_SERVICE_ACCOUNT_FILE=/path/to/dwd-sa.json
@@ -62,7 +59,7 @@ python scripts/send_roleplay_reminders.py --dry-run     # 未実施者と本文�
 ## ✅ 今回の方針：個別DM経路（管理者チェックリスト）
 
 各プランナーの Google Chat に **bot から個別DM** で、
-「今日ロープレ未実施の人へ・平日15:00・休みの人は除外」してリマインドします。上から順に。
+「午前中ロープレ未実施の人へ・平日12:00・休みの人は除外」してリマインドします。上から順に。
 
 **① GCPプロジェクト `eigyou-ro-pure`（オーナー権限：例 hkumada@）**
 - [ ] Chat API / Admin SDK API を有効化（Calendar API は有効化済み）
@@ -86,8 +83,13 @@ python scripts/send_roleplay_reminders.py --dry-run     # 未実施者と本文�
 - [ ] `CALENDAR_SA_JSON` … 録画用DWD SAの鍵JSON（枠作成＋休み判定用）
 - [ ]（`KNOWLEDGE_SHEET_ID` / `KNOWLEDGE_SA_JSON` は登録済み）
 
-**④ テスト**：Actions → `roleplay-reminder` → **Run workflow** で手動実行。以降は平日15:00に自動送信。
+**④ テスト**：Actions → `roleplay-reminder` → **Run workflow** で手動実行。以降は平日12:00に自動送信。
 カレンダー枠は `python scripts/setup_roleplay_calendar.py`（まず `--dry-run`）で各人に作成。
+個別DMの準備状況は、送信せず次のコマンドで8名分を一覧確認できます。
+
+```bash
+PYTHONPATH=. python scripts/check_chat_dm_readiness.py
+```
 
 ---
 
@@ -96,9 +98,8 @@ python scripts/send_roleplay_reminders.py --dry-run     # 未実施者と本文�
 | 用途 | 認証 | スコープ | 使う env |
 | --- | --- | --- | --- |
 | カレンダー枠作成 | DWD SA（各人を impersonate） | `calendar.events` | `GOOGLE_SERVICE_ACCOUNT_FILE` or `CALENDAR_SA_JSON` |
-| 個人DM（推奨） | Chat アプリSA + Directory DWD | `chat.bot` / `admin.directory.user.readonly` | `CHAT_SA_JSON`/`CHAT_SA_FILE`, `CHAT_ADMIN_SUBJECT` |
-| DMの簡易代替 | Incoming Webhook | 不要 | `CHAT_WEBHOOK_URL` |
-| 当日実施の判定 | 知識SA（読み取り） | `spreadsheets` | `KNOWLEDGE_SHEET_ID`, `KNOWLEDGE_SA_JSON`/`KNOWLEDGE_SA_FILE` |
+| 個人DM | Chat アプリSA + Directory DWD | `chat.bot` / `admin.directory.user.readonly` | `CHAT_SA_JSON`/`CHAT_SA_FILE`, `CHAT_ADMIN_SUBJECT` |
+| 午前中実施の判定 | 知識SA（読み取り） | `spreadsheets` | `KNOWLEDGE_SHEET_ID`, `KNOWLEDGE_SA_JSON`/`KNOWLEDGE_SA_FILE` |
 | 休みスキップ（任意） | DWD SA（各人を impersonate） | `calendar.readonly` | `CALENDAR_SA_JSON` or `GOOGLE_SERVICE_ACCOUNT_FILE` |
 
 > **セキュリティ注記**：Chat 用は **専用の最小権限 SA** を新規発行してください。録画/ドライブ用の
@@ -108,7 +109,7 @@ python scripts/send_roleplay_reminders.py --dry-run     # 未実施者と本文�
 
 ---
 
-## A. Google Chat アプリ（ボット）の作成 ＝ 個人DM経路（推奨）
+## A. Google Chat アプリ（ボット）の作成 ＝ 個人DM経路
 
 1. [Google Cloud Console](https://console.cloud.google.com/) の対象プロジェクトで
    「APIとサービス」→「ライブラリ」から **Google Chat API** と **Admin SDK API** を有効化。
@@ -128,15 +129,15 @@ python scripts/send_roleplay_reminders.py --dry-run     # 未実施者と本文�
 5. Chat 投稿自体はアプリ認証（`chat.bot`）で行います。組織のポリシーでボットからの
    DM を許可しておいてください。
 
-> **難しければ、まずは Webhook で開始（下記 B）**。DM の org 設定が整ってから A に移行できます。
-> 送信経路は env の有無で自動判定されます（DM 用 env があれば DM、無ければ Webhook）。
+> 管理者がプランナー用のグループまたは組織単位へChatアプリを一括インストールすると、
+> 各プランナーとボットの1対1 DMが用意されます。このグループはアプリ配布先を指定する
+> ためだけに使い、グループチャットへは投稿しません。
+> 個人DMが未設定・未作成の場合、ロープレ通知はグループ投稿へ切り替えず送信を中止します。
 
-## B. かんたん代替：Chat スペース + Incoming Webhook
+## B. Webhookはロープレ通知に使用しない
 
-1. 通知用の Google Chat スペースを作成（対象者を招待）。
-2. スペースの「アプリと統合」→「Webhook」→ 追加 → **Webhook URL** を発行。
-3. その URL を `CHAT_WEBHOOK_URL`（GitHub Secrets）に設定。
-4. この経路では個別DMではなく、**未実施者をまとめた1通**をスペースへ投稿します。
+ロープレ未実施は本人だけへ伝えるため、`CHAT_WEBHOOK_URL` が登録されていても使用しません。
+個人DMが使えない場合は何も送らず、安全に終了します。
 
 ---
 
@@ -161,13 +162,10 @@ python scripts/send_roleplay_reminders.py --dry-run     # 未実施者と本文�
 
 - `KNOWLEDGE_SHEET_ID` … 評価履歴シートのID（当日実施の判定に使用）
 - `KNOWLEDGE_SA_JSON` … 評価履歴シートを読む知識SAの鍵JSON
-- 個人DM経路を使う場合：
+- 個人DMに必須：
   - `CHAT_SA_JSON` … Chatアプリ用SAの鍵JSON（最小権限の専用SA）
   - `CHAT_ADMIN_SUBJECT` … Directory API 用に impersonate する管理者メール
-- Webhook経路を使う場合：
-  - `CHAT_WEBHOOK_URL` … 通知先スペースの Webhook URL
-
-> DM 用 env と Webhook URL の両方があれば **DM が優先**されます。
+`CHAT_WEBHOOK_URL` はロープレ通知では使用しません。
 
 ---
 
@@ -190,8 +188,8 @@ python scripts/setup_roleplay_calendar.py
 
 ### 未実施リマインド（自動＝GitHub Actions）
 
-`.github/workflows/roleplay-reminder.yml` が **平日15:00(JST)** に自動実行します
-（cron `0 6 * * 1-5` = 06:00 UTC）。手動実行は Actions タブの
+`.github/workflows/roleplay-reminder.yml` が **平日12:00(JST)** に自動実行します
+（cron `0 3 * * 1-5` = 03:00 UTC）。手動実行は Actions タブの
 `roleplay-reminder` → `Run workflow`。
 
 ### 送信前の検証（ローカル・送らない）
@@ -202,7 +200,7 @@ export KNOWLEDGE_SA_FILE=/path/to/knowledge-sa.json   # または KNOWLEDGE_SA_J
 python scripts/send_roleplay_reminders.py --dry-run
 ```
 
-`--dry-run` は当日未実施者と送信本文を表示するだけで、**一切送信しません**。
+`--dry-run` は午前中未実施者と送信本文を表示するだけで、**一切送信しません**。
 Chat の env が未設定なら、通常実行でも送信せず警告して終了します（exit 0）。
 `--dry-run` では「未実施者 ／ うち休みでスキップ ／ 実際に送る人」も表示されます。
 
@@ -210,7 +208,7 @@ Chat の env が未設定なら、通常実行でも送信せず警告して終�
 
 ## F. 休みの人には送らない（休みスキップ・任意）
 
-当日ロープレ未実施の人でも、その日が**休み**ならリマインドは送りません。休みかどうかは
+午前中ロープレ未実施の人でも、その日が**休み**ならリマインドは送りません。休みかどうかは
 本人のカレンダーの**予定タイトル**から判定します（DWD SA でカレンダーを読み取り）。
 
 ### 判定ルール（タイトル語で判定）
@@ -222,9 +220,12 @@ Chat の env が未設定なら、通常実行でも送信せず警告して終�
     `振替休日`, `振休`, `夏季休暇`, `冬季休暇`, `年末年始`, `全社休業`, `会社休`,
     `リフレッシュ休暇`, `特別休暇`, `産休`, `育休`, `慶弔`
   - 会社休（`夏季休暇` など）も対象（終日/時間指定を問わず送らない）。
-- **送る**：
-  - **半休は送る**（稼働扱い）。タイトルに**半休語**（`午前休`, `午後休`, `半休`,
-    `AM半休`, `PM半休`, `時間休`, `半日`）を含む予定は、OFF語を含んでいても休み扱いにしません。
+- **送らない（午前中に勤務しない）**：
+  - `午前休` / `午前半休` / `AM半休` は正午リマインドの対象外です。
+- **送る（午前中に勤務する）**：
+  - `午後休` / `午後半休` / `PM半休` は午前勤務のため対象です。
+  - `半休` / `時間休` / `半日` のように午前・午後を特定できない予定は、
+    取りこぼし防止のため対象に残します。
   - **祝日は送る**（祝日判定は実装しておらず、cron が平日のみのためそのまま平日として送信）。
   - `事務DAY` / `MTG` / `私用中抜け` / `資料作成` などはOFF語でないので送ります
     （**中抜けは稼働扱い**＝部分中抜けでは休みにしません）。
