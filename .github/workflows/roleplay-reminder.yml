@@ -1,6 +1,6 @@
 name: roleplay-reminder
 
-# 平日15:00(JST) に「本日ロープレ未実施の人」へ個人Chat DM（またはWebhook投稿）を送る。
+# 平日12:00(JST) に「午前中ロープレ未実施の人」へ個人Chat DM（またはWebhook投稿）を送る。
 # 必要な GitHub Secrets:
 #   KNOWLEDGE_SHEET_ID  … 評価履歴シートのID（当日実施の判定に使う）
 #   KNOWLEDGE_SA_JSON   … 評価履歴シートを読む知識SAの鍵JSON
@@ -15,7 +15,7 @@ name: roleplay-reminder
 
 on:
   schedule:
-    - cron: "0 6 * * 1-5"   # 06:00 UTC = 15:00 JST の平日(月〜金)
+    - cron: "0 3 * * 1-5"   # 03:00 UTC = 12:00 JST の平日(月〜金)
   workflow_dispatch:          # 手動実行も可
 
 concurrency:

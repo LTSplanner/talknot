@@ -35,6 +35,12 @@ OFF_KEYWORDS: tuple[str, ...] = (
 HALFDAY_KEYWORDS: tuple[str, ...] = (
     "午前休", "午後休", "半休", "am半休", "pm半休", "時間休", "半日",
 )
+MORNING_OFF_KEYWORDS: tuple[str, ...] = (
+    "午前休", "午前半休", "am半休",
+)
+AFTERNOON_OFF_KEYWORDS: tuple[str, ...] = (
+    "午後休", "午後半休", "pm半休",
+)
 
 
 def today_jst_str(now: _dt.datetime | None = None) -> str:
@@ -83,6 +89,33 @@ def did_roleplay_today(records: list[dict], email: str, today_jst_str: str) -> b
     return False
 
 
+def did_roleplay_before(
+    records: list[dict],
+    email: str,
+    today_jst_str: str,
+    cutoff_hhmmss: str,
+) -> bool:
+    """JSTの当日、締切時刻より前にロープレを完了していれば True。
+
+    ``saved_at`` は ``YYYY-MM-DD HH:MM:SS`` 形式を前提とする。
+    締切ちょうど（例 12:00:00）は午前中の実施に含めない。
+    """
+    target = _norm_email(email)
+    if not target:
+        return False
+    for rec in records:
+        if _norm_email(rec.get("user_email")) != target:
+            continue
+        if not _is_roleplay(rec) or _record_date(rec) != today_jst_str:
+            continue
+        saved_at = (rec.get("saved_at") or "").strip()
+        if len(saved_at) < 19:
+            continue
+        if saved_at[11:19] < cutoff_hhmmss:
+            return True
+    return False
+
+
 def missed_today(
     records: list[dict], targets: list[str], today_jst_str: str
 ) -> list[str]:
@@ -99,6 +132,25 @@ def missed_today(
             continue
         seen.add(key)
         if not did_roleplay_today(records, email, today_jst_str):
+            missed.append(email)
+    return missed
+
+
+def missed_before(
+    records: list[dict],
+    targets: list[str],
+    today_jst_str: str,
+    cutoff_hhmmss: str,
+) -> list[str]:
+    """締切時刻までに当日ロープレを完了していない対象者を返す。"""
+    missed: list[str] = []
+    seen: set[str] = set()
+    for email in targets:
+        key = _norm_email(email)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        if not did_roleplay_before(records, email, today_jst_str, cutoff_hhmmss):
             missed.append(email)
     return missed
 
@@ -134,5 +186,25 @@ def is_off_today(
         if _contains_any(title, halfday_keywords):
             continue
         if _contains_any(title, off_keywords):
+            return True
+    return False
+
+
+def is_off_morning(events: list[dict]) -> bool:
+    """午前中に勤務予定がなく、正午リマインドを送らない人なら True。
+
+    全休に加えて午前休・AM半休は送信対象から外す。
+    午後休・PM半休は午前勤務なので送信対象に残す。
+    「半休」のように午前・午後が特定できない予定は、取りこぼし防止のため送信対象に残す。
+    """
+    for ev in events:
+        title = (ev.get("title") or "").lower()
+        if _contains_any(title, MORNING_OFF_KEYWORDS):
+            return True
+        if _contains_any(title, AFTERNOON_OFF_KEYWORDS):
+            continue
+        if _contains_any(title, HALFDAY_KEYWORDS):
+            continue
+        if _contains_any(title, OFF_KEYWORDS):
             return True
     return False
