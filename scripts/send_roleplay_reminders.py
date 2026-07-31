@@ -3,7 +3,7 @@
 流れ:
   1. sheets_knowledge.load_evaluations() で評価レコードを読む。
   2. core.reminders.missed_before() で午前中ロープレ未実施の対象者を出す。
-  3. services.google_chat.notify() で各人へDM（またはWebhookでまとめ投稿）。
+  3. services.google_chat.notify_individually() で各人へ個別DM。
 
 方針:
   - 送信設定（Chat）や履歴設定（Knowledgeシート）が無い場合は送らず、
@@ -12,7 +12,8 @@
   - どんな例外でもプロセスを落とさない（最後は exit 0）。
 
 storage 実行 env: KNOWLEDGE_SHEET_ID, KNOWLEDGE_SA_JSON か KNOWLEDGE_SA_FILE。
-送信 env（いずれか）: CHAT_SA_JSON/CHAT_SA_FILE + CHAT_ADMIN_SUBJECT、または CHAT_WEBHOOK_URL。
+送信 env: CHAT_SA_JSON/CHAT_SA_FILE + CHAT_ADMIN_SUBJECT。
+ロープレ通知は個別DM専用とし、Webhookのグループ投稿には切り替えない。
 """
 from __future__ import annotations
 
@@ -137,11 +138,11 @@ def main() -> int:
             print(text)
         return 0
 
-    if not google_chat.configured():
-        print("Chat送信が未設定（CHAT_SA_* / CHAT_ADMIN_SUBJECT か CHAT_WEBHOOK_URL）。送信せず終了。")
+    if not google_chat.dm_configured():
+        print("個人DMが未設定（CHAT_SA_* / CHAT_ADMIN_SUBJECT）。グループ投稿へ切り替えず終了。")
         return 0
 
-    result = google_chat.notify(email_to_text)
+    result = google_chat.notify_individually(email_to_text)
     if result.get("skipped"):
         print("送信経路なしのためスキップ。")
         return 0

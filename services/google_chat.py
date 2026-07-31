@@ -57,6 +57,11 @@ def configured() -> bool:
     return bool(_mode())
 
 
+def dm_configured() -> bool:
+    """個人DM経路が使える設定か。Webhookだけの場合は False。"""
+    return _has_dm_config()
+
+
 # --------------------------------------------------------------------------- #
 # 認証（遅延 import：テスト・未設定時に依存を要求しない）
 # --------------------------------------------------------------------------- #
@@ -99,20 +104,33 @@ def _chat_service():
     return build("chat", "v1", credentials=creds, cache_discovery=False)
 
 
+def _find_direct_message(user_email: str, service=None) -> str:
+    """対象ユーザーとChatアプリの既存DMを探し、スペース名を返す。"""
+    service = service or _chat_service()
+    user_id = _resolve_user_id(user_email)
+    dm = service.spaces().findDirectMessage(name=user_id).execute()
+    return dm["name"]
+
+
+def direct_message_exists(user_email: str) -> bool:
+    """対象ユーザーとの個別DMが準備済みなら True。送信は行わない。"""
+    try:
+        _find_direct_message(user_email)
+        return True
+    except Exception as e:  # noqa: BLE001 Google APIの404だけ未準備として扱う
+        status = getattr(getattr(e, "resp", None), "status", None)
+        if status == 404:
+            return False
+        raise
+
+
 # --------------------------------------------------------------------------- #
 # 送信
 # --------------------------------------------------------------------------- #
 def _send_dm(user_email: str, text: str) -> None:
     """対象ユーザーとの DM スペースへ1件投稿する（アプリ認証）。"""
     service = _chat_service()
-    user_id = _resolve_user_id(user_email)
-    # 対象ユーザーとアプリの間のDMスペースを取得（無ければ Google 側が用意する）。
-    dm = (
-        service.spaces()
-        .findDirectMessage(name=user_id)
-        .execute()
-    )
-    space_name = dm["name"]
+    space_name = _find_direct_message(user_email, service)
     service.spaces().messages().create(
         parent=space_name, body={"text": text}
     ).execute()
@@ -138,6 +156,32 @@ def send_dm(user_email: str, text: str) -> None:
     _send_dm(user_email, text)
 
 
+def notify_individually(email_to_text: dict[str, str]) -> dict:
+    """複数人へ個別DMだけで順次送信する。Webhookには切り替えない。
+
+    個人DM設定が無い場合は何も送らず ``skipped=True`` を返す。
+    1件失敗しても、ほかの対象者への送信は続ける。
+    """
+    result: dict = {
+        "mode": "dm" if _has_dm_config() else "",
+        "sent": [],
+        "failed": [],
+        "skipped": False,
+    }
+    if not email_to_text:
+        return result
+    if not _has_dm_config():
+        result["skipped"] = True
+        return result
+    for email, text in email_to_text.items():
+        try:
+            _send_dm(email, text)
+            result["sent"].append(email)
+        except Exception as e:  # noqa: BLE001 1件失敗でも他を続行
+            result["failed"].append((email, str(e)[:200]))
+    return result
+
+
 def notify(email_to_text: dict[str, str]) -> dict:
     """複数人へ順次送信する。1件失敗しても続行し、成否を集計して返す。
 
@@ -155,13 +199,7 @@ def notify(email_to_text: dict[str, str]) -> dict:
 
     mode = result["mode"]
     if mode == "dm":
-        for email, text in email_to_text.items():
-            try:
-                _send_dm(email, text)
-                result["sent"].append(email)
-            except Exception as e:  # noqa: BLE001 1件失敗でも他を続行
-                result["failed"].append((email, str(e)[:200]))
-        return result
+        return notify_individually(email_to_text)
 
     if mode == "webhook":
         # 個別DMが張れないので、まとめて1通のスペース投稿にする。
