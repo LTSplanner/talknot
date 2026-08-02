@@ -94,6 +94,10 @@ def _collect(targets: list[str], sa_info: dict, lookback_days: int):
         for m in meetings:
             if not is_first_meeting(m.get("summary", "")):
                 continue
+            # 稼働開始日より前の過去分は自動評価しない（本日分から）
+            if settings.AUTO_EVAL_START_DATE and \
+                    m.get("start_date", "") < settings.AUTO_EVAL_START_DATE:
+                continue
             candidates.append({
                 "planner": planner,
                 "case_id": m.get("case_id", ""),

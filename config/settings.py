@@ -80,6 +80,9 @@ MAX_CONCURRENT_ANALYSES = _int_env("MAX_CONCURRENT_ANALYSES", 1)
 AUTO_EVAL_DAILY_LIMIT = _int_env("AUTO_EVAL_DAILY_LIMIT", 5)
 # カレンダーを何日さかのぼって初回商談を探すか（録画が出揃うまでの猶予）。
 AUTO_EVAL_LOOKBACK_DAYS = _int_env("AUTO_EVAL_LOOKBACK_DAYS", 14)
+# この日付(YYYY-MM-DD)より前の商談は自動評価しない（稼働開始前の過去分を一括評価しないため）。
+# 既定は稼働開始日。空にすると制限なし（さかのぼり分も対象）。
+AUTO_EVAL_START_DATE = os.getenv("AUTO_EVAL_START_DATE", "2026-08-02")
 
 # --- Google OAuth / Drive ---
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
