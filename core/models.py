@@ -40,6 +40,48 @@ def _strip_speaker(text: str) -> str:
     return _SPEAKER_PREFIX.sub("", text, count=1)
 
 
+# 「」で囲まれた引用（emotion_note に書かれたお客様の言葉）を拾う。
+_QUOTED = re.compile(r"[「『]([^」』]+)[」』]")
+# 比較用に落とす記号・空白。表記ゆれで取り違えを見逃さないため広めに取る。
+_NOISE = re.compile(r"[\s、。，．,.!！?？…‥・~〜ー\-—「」『』()（）\[\]【】]+")
+
+
+def _norm_talk(text: str) -> str:
+    """発言どうしを突き合わせるための正規化（記号・空白を除去）。"""
+    return _NOISE.sub("", text or "")
+
+
+def _is_customer_echo(before: str, customer_line: str, emotion_note: str) -> bool:
+    """before がお客様の発言の写しになっていないかを判定する。
+
+    Gemini は話者を取り違えることがあり、その場合 before に
+    「営業が返した言葉」ではなく「お客様が言った言葉」がそのまま入る。
+    customer_line と emotion_note 内の引用を照合して検出する。
+
+    営業がお客様の言葉をオウム返しする（正当なヒアリング技術）ケースを
+    誤検出しないよう、ほぼ全文が一致するときだけ真とする。
+    """
+    b = _norm_talk(before)
+    if len(b) < 6:  # 「はい」等の短い相槌は判定材料にならない
+        return False
+
+    candidates = [_norm_talk(customer_line)]
+    candidates += [_norm_talk(q) for q in _QUOTED.findall(emotion_note or "")]
+
+    for c in candidates:
+        if len(c) < 6:
+            continue
+        if b == c:
+            return True
+        # before がお客様の発言の一部を切り出しただけ
+        if b in c and len(b) / len(c) >= 0.6:
+            return True
+        # before がお客様の発言に一言足しただけ
+        if c in b and len(c) / len(b) >= 0.8:
+            return True
+    return False
+
+
 def _deep_ja_johari(obj):
     """dict/list を再帰的にたどり、文字列値のジョハリ英語表記を日本語へ置換する。"""
     if isinstance(obj, str):
@@ -131,8 +173,9 @@ class TimestampedFeedback:
     timestamp: str          # "MM:SS"
     criterion_key: str      # どの評価項目に関わるか
     emotion_note: str       # その瞬間のお客様の感情の動き（トーン・間から）
-    before: str             # 実際のトーク（感情をスルーしていた箇所）
+    before: str             # 【営業担当】が実際に話したトーク（空＝特定できなかった）
     after: str              # こう言うべきだった、の具体例
+    customer_line: str = ""  # きっかけになったお客様の発言（before との取り違え検出に使う）
 
 
 @dataclass
@@ -181,6 +224,32 @@ class EvaluationResult:
             reference_comment=s.get("reference_comment", s.get("comment", "")),
             sales_score=_int(s.get("sales_score", s.get("score", 0))),
             sales_comment=s.get("sales_comment", s.get("comment", "")),
+        )
+
+    @staticmethod
+    def _parse_feedback(f: dict) -> "TimestampedFeedback":
+        """1件の Before/After を組み立てる。話者の取り違えはここで止める。
+
+        before がお客様の発言の写しになっていたら、それは営業のトークではないので
+        before を空にし（＝UI では「特定できなかった」と表示）、お客様の言葉は
+        customer_line に寄せる。作り話で埋めないことを優先する。
+        """
+        emotion_note = f.get("emotion_note", "")
+        customer_line = _strip_speaker(f.get("customer_line", ""))
+        before = _strip_speaker(f.get("before", ""))
+
+        if _is_customer_echo(before, customer_line, emotion_note):
+            if not customer_line:
+                customer_line = before
+            before = ""
+
+        return TimestampedFeedback(
+            timestamp=f.get("timestamp", ""),
+            criterion_key=f.get("criterion_key", ""),
+            emotion_note=emotion_note,
+            before=before,
+            after=_strip_speaker(f.get("after", "")),
+            customer_line=customer_line,
         )
 
     @classmethod
@@ -242,16 +311,7 @@ class EvaluationResult:
                 for h in data.get("hidden_needs", [])
                 if h.get("inferred_need")
             ],
-            feedback=[
-                TimestampedFeedback(
-                    timestamp=f.get("timestamp", ""),
-                    criterion_key=f.get("criterion_key", ""),
-                    emotion_note=f.get("emotion_note", ""),
-                    before=_strip_speaker(f.get("before", "")),
-                    after=_strip_speaker(f.get("after", "")),
-                )
-                for f in data.get("feedback", [])
-            ],
+            feedback=[cls._parse_feedback(f) for f in data.get("feedback", [])],
             summary=data.get("summary", ""),
             knowledge=[
                 KnowledgeItem(

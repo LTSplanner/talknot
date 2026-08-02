@@ -249,10 +249,16 @@ def evaluation_result(result: EvaluationResult) -> None:
             with st.expander(f"⏱ {f.timestamp}　{label}"):
                 if f.emotion_note:
                     st.caption(f"💗 お客様の感情の動き：{f.emotion_note}")
+                if f.customer_line:
+                    st.caption(f"🗣 お客様の発言：「{f.customer_line}」")
                 col_b, col_a = st.columns(2)
                 with col_b:
-                    st.markdown("**Before（実際のトーク）**")
-                    st.warning(f.before)
+                    st.markdown("**Before（実際の営業トーク）**")
+                    if f.before:
+                        st.warning(f.before)
+                    else:
+                        st.caption("この場面の営業トークは特定できませんでした"
+                                   "（お客様の発言との取り違えを検出したため非表示）")
                 with col_a:
                     st.markdown("**After（こう言えたら）**")
                     st.info(f.after)

@@ -164,3 +164,67 @@ def test_customer_profile_normalizes_bad_attributes():
     assert r.customer_profile.attributes == []
     assert r.customer_profile.summary == ""
     assert r.customer_profile.next_approach == ""
+
+
+# --- Before に「お客様の発言」が混入する話者取り違えの防止 -------------------
+# 実際に本番で出てしまった 2 件をそのまま回帰テストにしている。
+
+def test_before_falls_back_to_empty_when_it_echoes_customer_line():
+    """before がお客様の発言そのものなら、営業トークとして表示しない。"""
+    data = {"feedback": [{
+        "timestamp": "17:38",
+        "criterion_key": "emotion",
+        "emotion_note": "お客様はエコカラットの消臭・調湿効果について"
+                        "「なんか気持ち程度なのかなって勝手に思ってたんですけど」と半信半疑な様子。",
+        "before": "なんか気持ち程度なのかなって勝手に思ってたんですけど。",
+        "after": "そうですよね、実際に使ってみないと効果が分かりにくいかもしれません。",
+    }]}
+    f = EvaluationResult.from_dict(data).feedback[0]
+    assert f.before == ""
+    assert "気持ち程度" in f.customer_line
+    assert f.after.startswith("そうですよね")
+
+
+def test_before_echo_detected_from_customer_line_field():
+    data = {"feedback": [{
+        "timestamp": "23:12",
+        "criterion_key": "flexibility",
+        "emotion_note": "お客様は玄関ミラーについて困惑している。",
+        "customer_line": "いや、そうなんすね。ミラーも欲しかったんですけど、"
+                         "なんかあんまりつけるところがないなと言いますか。",
+        "before": "いや、そうなんすね。ミラーも欲しかったんですけど、"
+                  "なんかあんまりつけるところがないなと言いますか。",
+        "after": "ミラーの設置場所、確かに悩ましいですよね。",
+    }]}
+    f = EvaluationResult.from_dict(data).feedback[0]
+    assert f.before == ""
+    assert f.customer_line.startswith("いや、そうなんすね")
+
+
+def test_genuine_sales_talk_is_kept():
+    """営業本人のトークは当然そのまま残る（過検出しない）。"""
+    data = {"feedback": [{
+        "timestamp": "05:00",
+        "criterion_key": "emotion",
+        "emotion_note": "お客様は「予算が心配で」と不安そう。",
+        "customer_line": "予算が心配で",
+        "before": "ご予算については後ほどまとめてご説明しますね。",
+        "after": "ご予算のご不安、先に伺ってもよろしいですか？",
+    }]}
+    f = EvaluationResult.from_dict(data).feedback[0]
+    assert f.before == "ご予算については後ほどまとめてご説明しますね。"
+
+
+def test_parroting_back_the_customer_is_not_flagged():
+    """お客様の言葉を受け止めて返すオウム返しは、正当な営業トークなので残す。"""
+    data = {"feedback": [{
+        "timestamp": "06:00",
+        "criterion_key": "emotion",
+        "emotion_note": "お客様は「デザインが重いかなって」と迷っている。",
+        "customer_line": "デザインが重いかなって",
+        "before": "デザインが重いかな、と感じられるんですね。"
+                  "どのあたりがそう思われますか？色味でしょうか、それとも面積でしょうか。",
+        "after": "デザインが重く感じられるんですね。どんな雰囲気がお好みですか？",
+    }]}
+    f = EvaluationResult.from_dict(data).feedback[0]
+    assert f.before.startswith("デザインが重いかな、と感じられるんですね")
