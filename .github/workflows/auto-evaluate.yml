@@ -1,0 +1,44 @@
+name: auto-evaluate-meetings
+
+# 平日 21:00(JST) に「初回商談の録画」を自動評価する（無人・完了通知なし）。
+# 対象は初回商談のみ・1日最大5件（全プランナー合算・古い未処理から順）。超過は翌日以降へ持ち越す。
+# 必要な GitHub Secrets:
+#   CALENDAR_SA_JSON  … カレンダー/ドライブ読み取り用 DWD SA の鍵JSON
+#                       （無ければ GOOGLE_SERVICE_ACCOUNT_FILE のパスを使う運用も可）
+#   GEMINI_API_KEY    … 動画解析に使う Gemini APIキー
+#   KNOWLEDGE_SHEET_ID / KNOWLEDGE_SA_JSON … 評価履歴・弊社ナレッジの永続化シート
+# 未設定でもスクリプトは exit 0 で静かに終わる（Actions を赤くしない方針）。
+
+on:
+  schedule:
+    - cron: "0 12 * * 1-5"   # 12:00 UTC = 21:00 JST の平日(月〜金)
+  workflow_dispatch:          # 手動実行も可
+
+concurrency:
+  group: auto-evaluate-meetings
+  cancel-in-progress: false
+
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Auto-evaluate first meetings
+        env:
+          # リポジトリ直下を import パスに通す（`from services import ...` 用）。
+          PYTHONPATH: .
+          CALENDAR_SA_JSON: ${{ secrets.CALENDAR_SA_JSON }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          KNOWLEDGE_SHEET_ID: ${{ secrets.KNOWLEDGE_SHEET_ID }}
+          KNOWLEDGE_SA_JSON: ${{ secrets.KNOWLEDGE_SA_JSON }}
+        # 失敗しても通知を鳴らさない（スクリプト自体も exit 0 方針だが二重で保険）。
+        run: python scripts/auto_evaluate_meetings.py || true

@@ -74,6 +74,13 @@ def _int_env(key: str, default: int) -> int:
 
 MAX_CONCURRENT_ANALYSES = _int_env("MAX_CONCURRENT_ANALYSES", 1)
 
+# --- 初回商談の自動評価バッチ（scripts/auto_evaluate_meetings.py）---
+# 1日あたりに自動評価する件数の上限（全プランナー合算・古い未処理から順に処理）。
+# 無料枠・メモリ保護のため既定は控えめ。超過分は翌日以降に自然と持ち越す。
+AUTO_EVAL_DAILY_LIMIT = _int_env("AUTO_EVAL_DAILY_LIMIT", 5)
+# カレンダーを何日さかのぼって初回商談を探すか（録画が出揃うまでの猶予）。
+AUTO_EVAL_LOOKBACK_DAYS = _int_env("AUTO_EVAL_LOOKBACK_DAYS", 14)
+
 # --- Google OAuth / Drive ---
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
 GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "")

@@ -256,3 +256,61 @@ Google Chat の**個人DM**で通知します（実施者・対象・エラー�
 - 未設定なら通知は**静かにスキップ**（評価処理は通常どおり継続）。
 - Webhook(`CHAT_WEBHOOK_URL`)しか無い場合は、そのスペースへ素の本文で投稿します（DMではない）。
 - 宛先を変えるには env `ERROR_NOTIFY_EMAIL` を設定。空にすると通知しません。
+
+---
+
+## H. 初回商談の自動評価（無人バッチ）
+
+各プランナーの**初回商談の録画**を、定期バッチで自動評価し、**各人の評価履歴に保存**します。
+人手を介さず「カレンダーの商談予定 → ドライブの録画を照合 → まだ評価していないものだけ
+AI評価」までを無人で回します。**完了通知はしません**（評価履歴に入るだけ）。
+
+### 仕組み（`scripts/auto_evaluate_meetings.py`）
+
+1. 各プランナー（`TARGET_ACCOUNTS`）を **DWD SA で impersonate** し、カレンダーの直近
+   `AUTO_EVAL_LOOKBACK_DAYS`（既定14日）の商談予定を取得（`deals_only=True`＝案件番号L付きのみ）。
+2. **初回商談だけ**に絞る（予定タイトルに「初回」を含む・`core.auto_eval.is_first_meeting`）。
+3. **二重評価の除外**：各人の評価履歴（`storage.list_evaluations`）の **label（＝予定タイトル）に
+   案件番号を含む評価が既にあれば**、その案件は対象から外す（done/error/processing を問わず＝
+   二重処理と無限リトライを防ぐ）。
+4. **1日最大 `AUTO_EVAL_DAILY_LIMIT` 件**（既定5・全プランナー合算）を、**古い未処理から順**に選ぶ
+   （`core.auto_eval.select_targets`）。超過分は翌日以降に自然と持ち越し。
+5. 選ばれた各件を `find_recording` で録画照合し、**録画が見つかったものだけ**ダウンロード →
+   `gemini_analyzer.analyze` → `storage.save_evaluation`（label＝予定タイトル）。
+   **録画未検出はスキップ**（次回に持ち越し）。失敗は `fail_evaluation` で記録して継続
+   （既存の管理者エラー通知が走るのは可）。一時ファイルは必ず削除します。
+
+> 仕様まとめ：**初回商談のみ／1日5件まで（古い順）／録画が無ければ持ち越し／完了通知なし**。
+> 動画解析は**1件ずつ直列**（無料枠・メモリ保護）。
+
+### 必要な GitHub Secrets（多くは既存を流用）
+
+- `CALENDAR_SA_JSON` … カレンダー/ドライブ読み取り用 **DWD SA** の鍵JSON
+  （無ければ `GOOGLE_SERVICE_ACCOUNT_FILE` のパス運用も可）。
+  委任スコープ：`calendar.readonly` ＋ `drive.readonly`（C と同手順で追加）。
+- `GEMINI_API_KEY` … 動画解析に使う Gemini APIキー。
+- `KNOWLEDGE_SHEET_ID` / `KNOWLEDGE_SA_JSON` … 評価履歴・弊社ナレッジの永続化シート
+  （リマインドと同じもの。無ければローカル保存にフォールバック）。
+
+### 実行（自動＝GitHub Actions）
+
+`.github/workflows/auto-evaluate.yml` が **平日21:00(JST)** に自動実行します
+（cron `0 12 * * 1-5` = 12:00 UTC）。手動実行は Actions タブの
+`auto-evaluate-meetings` → `Run workflow`。失敗しても通知は鳴らしません
+（スクリプトも `exit 0` 方針）。
+
+### 検証（ローカル・評価も保存もしない）
+
+```bash
+export CALENDAR_SA_JSON="$(cat /path/to/dwd-sa.json)"   # または GOOGLE_SERVICE_ACCOUNT_FILE
+python scripts/auto_evaluate_meetings.py --dry-run
+```
+
+`--dry-run` は **ダウンロード・AI評価・保存を一切せず**、評価予定リスト
+（プランナー／案件番号／タイトル／録画あり?）と件数だけ表示します。
+SA鍵などの env が未設定なら、通常実行でも**評価せず**警告して終了します（`exit 0`）。
+
+### 調整用の環境変数（`config/settings.py`）
+
+- `AUTO_EVAL_DAILY_LIMIT` … 1日あたりの評価件数の上限（既定 `5`）。
+- `AUTO_EVAL_LOOKBACK_DAYS` … カレンダーを何日さかのぼるか（既定 `14`）。
