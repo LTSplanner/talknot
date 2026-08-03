@@ -142,6 +142,42 @@ html, body, [class*="css"] {{
 .tk-card .tk-icon {{ font-size: 1.9rem; }}
 .tk-num {{ color: {BRAND_DEEP}; font-weight: 700; }}
 
+/* --- 称号バッジのコレクション --- */
+.tk-badge-grid {{
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+    gap: .7rem;
+    margin: .5rem 0 1.4rem;
+}}
+.tk-badge {{
+    background: #fff;
+    border: 1px solid rgba(78, 113, 137, 0.14);
+    border-radius: 16px;
+    padding: .85rem .7rem .75rem;
+    text-align: center;
+}}
+.tk-badge .b-icon {{ font-size: 1.9rem; line-height: 1.2; }}
+.tk-badge .b-name {{
+    font-weight: 700; font-size: .84rem; margin-top: .25rem; color: {BRAND_INK};
+}}
+.tk-badge .b-desc {{
+    font-size: .7rem; color: {MUTED}; margin-top: .2rem; line-height: 1.45;
+}}
+/* 獲得済みはブランド色で縁取り、未獲得は色を抜いて「これから」を示す */
+.tk-badge.earned {{
+    border-color: {BRAND}; background: {BRAND}12;
+    box-shadow: 0 4px 14px rgba(78, 113, 137, 0.10);
+}}
+.tk-badge.locked {{ background: #fff; }}
+.tk-badge.locked .b-icon {{ filter: grayscale(1); opacity: .38; }}
+.tk-badge.locked .b-name {{ color: {MUTED}; }}
+.tk-badge .b-bar {{
+    height: 5px; border-radius: 999px; background: rgba(78,113,137,.12);
+    margin-top: .45rem; overflow: hidden;
+}}
+.tk-badge .b-bar > span {{ display: block; height: 100%; background: {BRAND}; }}
+.tk-badge .b-left {{ font-size: .67rem; color: {MUTED}; margin-top: .25rem; }}
+
 /* --- ボタン --- */
 .stButton > button, .stLinkButton > a {{
     border-radius: 999px;

@@ -1520,6 +1520,35 @@ _CATEGORY_LABELS = {
 }
 
 
+def render_badges_tab(user: dict) -> None:
+    """個人ページ：称号バッジのコレクション。
+
+    取得状況は保存せず、評価履歴から毎回計算する（core.badges）。
+    あとから称号を足しても過去の実績にさかのぼって反映される。
+    """
+    from core import badges
+
+    email = user.get("email", "")
+    who_label = ""
+    # 管理者・閲覧専用は、メンバーを選んでそのコレクションを見られる。
+    if settings.is_admin(email) or settings.is_viewer(email):
+        members = sorted(set(settings.TARGET_ACCOUNTS) | ({email} if email else set()))
+        picked = st.selectbox("メンバーを選ぶ", members,
+                              index=members.index(email) if email in members else 0,
+                              key="badge_member")
+        if picked != email:
+            who_label = f"{picked.split('@')[0]} さんの "
+        email = picked
+
+    try:
+        records = storage.list_evaluations(email)
+    except Exception as e:  # noqa: BLE001 履歴が読めないときは画面を壊さない
+        st.error(f"評価履歴を読み込めませんでした：{str(e)[:150]}")
+        return
+
+    components.badge_collection(badges.evaluate(records), who_label)
+
+
 def render_knowledge_tab(user: dict) -> None:
     st.markdown("##### 弊社ナレッジ（AIが前提にする社内知識）")
     st.write(
@@ -1797,14 +1826,16 @@ def render_app(user: dict) -> None:
     components.hero(compact=True)
     _render_roleplay_nudge(user)
 
-    evaluate, roleplay, reference, knowledge, history, about = st.tabs(
-        ["🎥 商談を評価する", "🎙️ 1人ロープレ", "⭐ 模範トーク",
+    evaluate, roleplay, badges_tab, reference, knowledge, history, about = st.tabs(
+        ["🎥 商談を評価する", "🎙️ 1人ロープレ", "🏅 称号バッジ", "⭐ 模範トーク",
          "🧠 弊社ナレッジ", "🕘 評価履歴", "📊 評価項目について"]
     )
     with evaluate:
         render_evaluate_tab(user)
     with roleplay:
         render_roleplay_tab(user)
+    with badges_tab:
+        render_badges_tab(user)
     with reference:
         render_reference_tab(user)
     with knowledge:

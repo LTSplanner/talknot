@@ -381,6 +381,75 @@ def evaluation_result(result: EvaluationResult) -> None:
             st.success(result.summary)
 
 
+def _badge_tile(status) -> str:
+    """称号1つぶんのタイル HTML。未取得は色を抜いて進捗バーを出す。"""
+    b = status.badge
+    if status.earned:
+        return (
+            '<div class="tk-badge earned">'
+            f'<div class="b-icon">{b.icon}</div>'
+            f'<div class="b-name">{b.name}</div>'
+            f'<div class="b-desc">{b.description}</div>'
+            "</div>"
+        )
+    pct = round(status.progress * 100)
+    # 「あと◯」が見えると次の一歩が具体的になる（0/◯ のときは出さない）
+    left = (
+        f'<div class="b-left">あと {status.remaining:.0f}</div>'
+        if status.current > 0 else '<div class="b-left">これから</div>'
+    )
+    return (
+        '<div class="tk-badge locked">'
+        f'<div class="b-icon">{b.icon}</div>'
+        f'<div class="b-name">？？？</div>'
+        f'<div class="b-desc">{b.description}</div>'
+        f'<div class="b-bar"><span style="width:{pct}%"></span></div>'
+        f"{left}</div>"
+    )
+
+
+def badge_collection(statuses: list, who_label: str = "") -> None:
+    """称号バッジのコレクション画面（個人ページ）。
+
+    取得済みは色付き、未取得はグレーで条件と進捗だけ見せる。何を頑張れば
+    埋まるのかが分かるように、未取得も隠さず並べる方針。
+    """
+    from core import badges as _badges
+    from core.badge_defs import FAMILY_LABELS
+
+    total = len(statuses)
+    got = _badges.earned_count(statuses)
+    st.markdown(f"#### 🏅 {who_label}称号コレクション　{got} / {total}")
+    st.progress(got / total if total else 0.0)
+
+    nxt = _badges.next_up(statuses, 3)
+    if nxt:
+        st.markdown("**あと少しで取れる称号**")
+        cols = st.columns(len(nxt))
+        for col, s in zip(cols, nxt):
+            col.markdown(
+                f"{s.badge.icon} **{s.badge.name}**　"
+                f"<span style='color:{theme.MUTED};font-size:.85rem'>"
+                f"{s.badge.description}（あと {s.remaining:.0f}）</span>",
+                unsafe_allow_html=True,
+            )
+        st.divider()
+
+    for category, label in (("roleplay", "🎙️ 1人ロープレ"), ("meeting", "🎥 商談")):
+        in_cat = [s for s in statuses if s.badge.category == category]
+        cat_got = _badges.earned_count(in_cat)
+        st.markdown(f"##### {label}　{cat_got} / {len(in_cat)}")
+        for family, fam_label in FAMILY_LABELS.items():
+            in_fam = [s for s in in_cat if s.badge.family == family]
+            if not in_fam:
+                continue
+            fam_got = _badges.earned_count(in_fam)
+            st.caption(f"{fam_label}　{fam_got} / {len(in_fam)}")
+            tiles = "".join(_badge_tile(s) for s in in_fam)
+            st.markdown(f'<div class="tk-badge-grid">{tiles}</div>',
+                        unsafe_allow_html=True)
+
+
 def sidebar(user: dict) -> None:
     """ログイン中ユーザー情報とナビゲーションを表示するサイドバー。"""
     with st.sidebar:
