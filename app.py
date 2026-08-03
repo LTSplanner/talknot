@@ -40,7 +40,9 @@ from core.models import EvaluationResult  # noqa: E402
 from services import drive_sa, gemini_analyzer, google_drive, storage, usage_log  # noqa: E402
 from ui import components, theme  # noqa: E402
 
-_BRAND_ICON = Path(__file__).parent / "assets" / "knote_icon.png"
+# タブに出るアイコン。ロゴ全文字は16pxで潰れるため、特徴的な「Li」だけを
+# コーポレートカラー地に白抜きで載せたものを使う（assets/lts_icon.png）。
+_BRAND_ICON = Path(__file__).parent / "assets" / "lts_icon.png"
 
 st.set_page_config(
     page_title="KNOTE（ノート）｜営業ロープレ評価",
@@ -136,19 +138,22 @@ def render_login() -> None:
         )
 
     with right:
-        st.markdown("<div class='tk-card'>", unsafe_allow_html=True)
-        st.markdown("##### サインイン")
-        if session.oauth_configured():
-            google_oauth.login_button()
-        else:
-            st.warning("OAuth 未設定のためデモログインです（.env を設定すると本番認証）。")
-            if st.button("デモでログイン", use_container_width=True):
-                st.session_state["user"] = {
-                    "name": "デモ ユーザー",
-                    "email": (settings.ADMIN_EMAILS or ["demo@yourcompany.com"])[0],
-                }
-                st.rerun()
-        st.markdown("</div>", unsafe_allow_html=True)
+        # カードは st.container(border=True) で作る。
+        # `st.markdown("<div class='tk-card'>")` で囲もうとすると、Streamlit が
+        # ブロックごとに HTML を閉じるため、中身の入らない空カードだけが
+        # 描画されてしまう（サインインの上に白い帯が出る原因だった）。
+        with st.container(border=True):
+            st.markdown("##### サインイン")
+            if session.oauth_configured():
+                google_oauth.login_button()
+            else:
+                st.warning("OAuth 未設定のためデモログインです（.env を設定すると本番認証）。")
+                if st.button("デモでログイン", use_container_width=True):
+                    st.session_state["user"] = {
+                        "name": "デモ ユーザー",
+                        "email": (settings.ADMIN_EMAILS or ["demo@yourcompany.com"])[0],
+                    }
+                    st.rerun()
 
 
 # --------------------------------------------------------------------------- #
