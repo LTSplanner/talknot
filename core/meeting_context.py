@@ -87,16 +87,15 @@ def fill_customer_placeholders(obj, customer_name: str):
     プレースホルダのまま出すことがある。改善案のセリフ（after / one_point.action）は
     そのまま口に出せることが価値なので、コード側でも直す。
 
-    customer_name は「矢野淳也様」のような形を想定し、姓（先頭2文字）を使う。
-    姓が判断できない短い名前のときは、渡された名前をそのまま使う。
+    置き換えるのは**確定情報の表記そのまま**（例「矢野淳也様」）。姓だけを取ろうと
+    すると「佐々木」を「佐々」にしてしまうなど誤りが起きるため、推測はしない。
     """
     name = _clean(customer_name).rstrip("様")
     if not name:
         return obj
-    surname = name[:2] if len(name) >= 3 else name
 
     def _fix(text: str) -> str:
-        return _PLACEHOLDER_RE.sub(surname, text)
+        return _PLACEHOLDER_RE.sub(name, text)
 
     def _walk(o):
         if isinstance(o, str):

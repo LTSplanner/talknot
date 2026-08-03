@@ -124,13 +124,14 @@ def test_fills_customer_name_placeholders():
         "feedback": [{"after": "○○様、そちらは（お客様名）様のご希望どおりです"}],
     }
     got = fill_customer_placeholders(data, "矢野淳也様")
-    assert got["one_point"]["action"] == "「矢野様はどんな雰囲気がお好みですか？」"
-    assert got["feedback"][0]["after"] == "矢野様、そちらは矢野様のご希望どおりです"
+    assert got["one_point"]["action"] == "「矢野淳也様はどんな雰囲気がお好みですか？」"
+    assert got["feedback"][0]["after"] == "矢野淳也様、そちらは矢野淳也様のご希望どおりです"
 
 
-def test_placeholder_fill_uses_short_name_as_is():
-    """姓が判断できない短い名前は、そのまま使う。"""
+def test_placeholder_fill_does_not_guess_a_surname():
+    """姓を推測しない（「佐々木」を「佐々」にするような誤りを避ける）。"""
     assert fill_customer_placeholders("〇〇様、こんにちは", "林様") == "林様、こんにちは"
+    assert fill_customer_placeholders("〇〇様へ", "佐々木健太様") == "佐々木健太様へ"
 
 
 def test_placeholder_fill_is_noop_without_customer():
@@ -156,3 +157,10 @@ def test_prompt_naming_rule_absent_without_customer():
     p = prompts.build_evaluation_prompt(
         meeting_context=build_meeting_context("", "安栗実沙"))
     assert "プレースホルダ" not in p
+
+
+def test_prompt_requires_a_speakable_line():
+    """『次の一言』は口に出せるセリフに限る（自分への指示にしない）。"""
+    p = prompts.build_evaluation_prompt()
+    assert "口に出せるセリフ" in p
+    assert "自分への指示" in p
