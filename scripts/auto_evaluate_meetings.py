@@ -31,6 +31,7 @@ import time
 
 from config import settings
 from core.auto_eval import case_ids_in, is_first_meeting, select_targets
+from core.meeting_context import build_meeting_context
 from services import gemini_analyzer, google_calendar, google_drive, storage
 
 # DWD で対象者を impersonate するときのスコープ（読み取りのみ）。
@@ -117,11 +118,14 @@ def _collect(targets: list[str], sa_info: dict, lookback_days: int):
     return candidates, done
 
 
-def _process_one(candidate: dict, creds, reference_talk, knowledge) -> str:
+def _process_one(
+    candidate: dict, creds, reference_talk, knowledge, planner_name: str = ""
+) -> str:
     """1件を録画照合→DL→評価→保存する。結果を短い文字列で返す（ログ用）。
 
     録画未検出は保存せずスキップ（次回持ち越し）。失敗は fail_evaluation して継続。
-    一時ファイルは必ず削除する。
+    一時ファイルは必ず削除する。planner_name（Workspaceの表示名）と予定タイトルから
+    確定情報を組み立てて渡し、固有名詞の当て字（例「安栗」→「アングルリ」）を防ぐ。
     """
     planner = candidate["planner"]
     summary = candidate["summary"]
@@ -129,11 +133,15 @@ def _process_one(candidate: dict, creds, reference_talk, knowledge) -> str:
     if not rec:
         return "録画なし（次回持ち越し）"
 
+    context = build_meeting_context(
+        summary, planner_name=planner_name, meeting_date=candidate.get("start_date", "")
+    )
+
     fd, tmp = tempfile.mkstemp(suffix=".mp4")
     os.close(fd)
     try:
         google_drive.download_to_path(creds, rec["id"], tmp)
-        result = gemini_analyzer.analyze(tmp, reference_talk, knowledge)
+        result = gemini_analyzer.analyze(tmp, reference_talk, knowledge, context)
         storage.save_evaluation(planner, result, label=summary)
         return "評価を保存"
     except Exception as e:  # noqa: BLE001 1件の失敗で全体を止めない
@@ -188,11 +196,18 @@ def main() -> int:
             print("模範トーク/ナレッジの読込みに失敗（無しで続行）:", str(e)[:120])
 
     creds_cache: dict[str, object] = {}
+    name_cache: dict[str, str] = {}
 
     def _creds(planner: str):
         if planner not in creds_cache:
             creds_cache[planner] = _creds_for(planner, sa_info)
         return creds_cache[planner]
+
+    def _planner_name(planner: str) -> str:
+        """営業担当の氏名（Workspaceの表示名）。取れなければ空文字のまま進める。"""
+        if planner not in name_cache:
+            name_cache[planner] = google_drive.get_display_name(_creds(planner))
+        return name_cache[planner]
 
     processed = 0
     for c in selected:
@@ -204,9 +219,16 @@ def main() -> int:
                     _creds(planner), c["summary"], c.get("start_date", "")
                 )
                 found = "あり" if rec else "なし"
-                print(f"  [dry-run] {planner} / {c['case_id']} / {c['summary']} / 録画: {found}")
+                ctx = build_meeting_context(
+                    c["summary"], _planner_name(planner), c.get("start_date", ""))
+                print(f"  [dry-run] {planner} / {c['case_id']} / {c['summary']} / "
+                      f"録画: {found}")
+                print(f"            確定情報 → 担当:{ctx['planner_name'] or '（不明）'} "
+                      f"/ お客様:{ctx['customer_name'] or '（不明）'} "
+                      f"/ 物件:{ctx['property_name'] or '（不明）'}")
                 continue
-            outcome = _process_one(c, _creds(planner), reference_talk, knowledge)
+            outcome = _process_one(
+                c, _creds(planner), reference_talk, knowledge, _planner_name(planner))
             if outcome == "評価を保存":
                 processed += 1
             print(f"  {planner} / {c['case_id']} / {c['summary']} → {outcome}")

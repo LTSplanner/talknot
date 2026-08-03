@@ -24,6 +24,23 @@ def _service(credentials: Credentials):
     return build("drive", "v3", credentials=credentials, cache_discovery=False)
 
 
+def get_display_name(credentials: Credentials) -> str:
+    """その Credentials の持ち主の表示名（例「安栗実沙」）を返す。取れなければ空文字。
+
+    Workspace のディレクトリに登録された氏名がそのまま返るため、営業担当の氏名を
+    音声の聞き取りに頼らず確定できる（＝Gemini が「安栗」を「アングルリ」のような
+    当て字で書くのを防ぐ）。Directory API と違い管理者権限は要らず、既存の
+    drive.readonly スコープだけで動く。
+
+    失敗しても評価自体は続けたいので、例外は投げずに空文字を返す。
+    """
+    try:
+        about = _service(credentials).about().get(fields="user(displayName)").execute()
+        return ((about.get("user") or {}).get("displayName") or "").strip()
+    except Exception:  # noqa: BLE001 氏名が取れなくても評価は続行する
+        return ""
+
+
 def list_videos(
     credentials: Credentials,
     name_contains: str | None = None,

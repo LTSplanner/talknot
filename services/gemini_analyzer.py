@@ -22,8 +22,10 @@ from core.models import EvaluationResult
 _POLL_INTERVAL_SEC = 2
 _POLL_TIMEOUT_SEC = 300
 
-# 出力(JSON)の上限。長尺の商談でも途中で切れにくいよう広めに取る。
-_MAX_OUTPUT_TOKENS = 32768
+# 出力(JSON)の上限。実際の出力は「1ポイント＋決定的な3〜5場面」に絞る方針だが、
+# 途中切断で JSON が壊れるのが一番痛いので、上限はモデルの最大まで開けておく
+# （gemini-2.5-flash の出力上限は 65536）。使わなければ課金・消費はされない。
+_MAX_OUTPUT_TOKENS = 65536
 
 # JSON厳守を促す追記（リトライ時にプロンプト末尾へ付ける）
 _STRICT_JSON = ("\n\n重要：応答は有効なJSONオブジェクトのみを返すこと。"
@@ -150,8 +152,14 @@ def analyze(
     video_path: str,
     reference_talk: str | None = None,
     knowledge_base: str | None = None,
+    meeting_context: dict | None = None,
 ) -> EvaluationResult:
-    """動画/音声ファイルを解析し EvaluationResult を返す。"""
+    """動画/音声ファイルを解析し EvaluationResult を返す。
+
+    meeting_context は core.meeting_context.build_meeting_context() が返す確定情報
+    （営業担当氏名・お客様名・物件名・案件番号）。渡すと固有名詞を聞き取りに頼らず
+    正しい表記で書かせられる。
+    """
     client = _client()
 
     # 映像は残す（表情など非言語も評価に使う）。長尺は動画の長さから fps を自動計算して
@@ -160,7 +168,8 @@ def analyze(
     uploaded = client.files.upload(file=video_path)
     uploaded = _wait_until_active(client, uploaded)
 
-    prompt = prompts.build_evaluation_prompt(reference_talk, knowledge_base)
+    prompt = prompts.build_evaluation_prompt(
+        reference_talk, knowledge_base, meeting_context)
 
     cfg = types.GenerateContentConfig(
         response_mime_type="application/json",
@@ -194,13 +203,15 @@ def analyze_roleplay(
     mime_type: str = "audio/wav",
     focus: str | None = None,
     persona: dict | None = None,
+    meeting_context: dict | None = None,
 ) -> EvaluationResult:
     """1人ロープレの録音（ターンごと）をまとめて1回の呼び出しで評価する。
 
     会話中は AI を呼ばず台本で進めるため、Gemini の呼び出しはこの1回だけ＝無料枠にやさしい。
     """
     client = _client()
-    prompt = prompts.build_roleplay_prompt(scenario_lines, talk_script, knowledge_base, focus, persona)
+    prompt = prompts.build_roleplay_prompt(
+        scenario_lines, talk_script, knowledge_base, focus, persona, meeting_context)
 
     contents: list = []
     for i, data in enumerate(audio_turns, 1):

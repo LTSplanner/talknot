@@ -113,10 +113,12 @@ def _johari_meter(j) -> None:
 
 
 def _customer_profile(profile) -> None:
-    """お客様の攻略メモ（属性タグ・人物像・次回の攻め方）を表示する。"""
+    """お客様の攻略メモ（属性タグ・人物像・次回の攻め方）を表示する。
+
+    見出しは呼び出し側（折りたたみのラベル）が持つため、ここでは中身だけ描く。
+    """
     if not profile:
         return
-    st.markdown("##### 🧭 このお客様の攻略メモ（次回の活かし方）")
     if profile.attributes:
         pills = "".join(
             f'<span style="display:inline-block;background:{theme.INDIGO}14;'
@@ -132,6 +134,40 @@ def _customer_profile(profile) -> None:
         st.markdown(profile.summary)
     if profile.next_approach:
         st.info(f"🎯 次回の攻め方：{profile.next_approach}")
+
+
+def _one_point_card(op) -> None:
+    """『次に直す1点』を結果画面の最上部に大きく出す。
+
+    点数・会話配分・シーン別まで一度に見せると何を直せばよいか分からなくなるため、
+    ここだけ読めば次の商談で試せる状態にする（PDCA の Plan を1つに絞る）。
+    """
+    if not op or not (op.headline or op.action):
+        return
+
+    stamp = (
+        f'<span style="background:{theme.INDIGO}14;color:{theme.INDIGO};'
+        f'border-radius:999px;padding:.1rem .6rem;font-size:.78rem;'
+        f'font-weight:600;margin-left:.5rem">⏱ {op.timestamp}</span>'
+        if op.timestamp else ""
+    )
+    st.markdown(
+        f"""
+        <div class="tk-card" style="text-align:left;border-left:5px solid {theme.CORAL};
+             background:{theme.CORAL}0d">
+            <div style="color:{theme.CORAL};font-size:.8rem;font-weight:700;
+                 letter-spacing:.08em">NEXT ONE POINT</div>
+            <h3 style="margin:.2rem 0 .4rem">{op.headline}{stamp}</h3>
+            <p style="margin:0;color:{theme.MUTED}">{op.reason}</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    if op.action:
+        st.markdown("**🗣 次回、この一言をそのまま使ってみましょう**")
+        st.info(op.action)
+    if op.keep:
+        st.markdown(f"✅ **続けたい良かった点：** {op.keep}")
 
 
 def criteria_overview() -> None:
@@ -192,76 +228,97 @@ def _score_rubric() -> None:
         )
 
 
+def _scene_feedback(f, expanded: bool = False) -> None:
+    """1場面の Before → After を表示する。"""
+    c = settings.CRITERIA_BY_KEY.get(f.criterion_key)
+    label = f"{c.icon} {c.title}" if c else f.criterion_key
+    with st.expander(f"⏱ {f.timestamp}　{label}", expanded=expanded):
+        if f.emotion_note:
+            st.caption(f"💗 お客様の感情の動き：{f.emotion_note}")
+        if f.customer_line:
+            st.caption(f"🗣 お客様の発言：「{f.customer_line}」")
+        col_b, col_a = st.columns(2)
+        with col_b:
+            st.markdown("**Before（実際の営業トーク）**")
+            if f.before:
+                st.warning(f.before)
+            else:
+                st.caption("この場面の営業トークは特定できませんでした"
+                           "（お客様の発言との取り違えを検出したため非表示）")
+        with col_a:
+            st.markdown("**After（こう言えたら）**")
+            st.info(f.after)
+
+
 def evaluation_result(result: EvaluationResult) -> None:
-    """評価結果を表示する：総合合計 → 5項目を総合スコア → 全体講評 → Before/After。"""
-    full = len(settings.EVALUATION_CRITERIA) * 5
-    # 総合スコア1本（旧2軸データは sales_score を総合として表示する）。
-    st.metric("🎯 総合スコア 合計", f"{result.overall_total} / {full}")
+    """評価結果を表示する。
 
-    cols = st.columns(len(settings.EVALUATION_CRITERIA))
-    for col, c in zip(cols, settings.EVALUATION_CRITERIA):
-        s = result.score_for(c.key)
-        sales_s = s.sales_score if s else 0
-        sales_cmt = s.sales_comment if s else ""
-        with col:
-            st.markdown(
-                f"""
-                <div class="tk-card">
-                    <div class="tk-icon">{c.icon}</div>
-                    <h4><span class="tk-num">{c.number}</span> {c.title}</h4>
-                    {_score_badge(sales_s)}
-                    <p>{sales_cmt}</p>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-
-    if result.johari:
-        _johari_meter(result.johari)
-
-    if result.hidden_needs:
-        st.markdown("##### 🔍 お客様の隠れたニーズ（秘密領域）")
-        st.caption(
-            "お客様が言葉にしていない不安・疑問を、非言語サインから読み取ったものです。"
-            "✅＝営業が踏み込めた／⚠️＝表面で流した。"
-        )
-        for h in result.hidden_needs:
-            caught = "✅ 踏み込めた" if h.surfaced else "⚠️ 取りこぼし"
-            head = f"⏱ {h.timestamp}　{caught}" if h.timestamp else caught
-            with st.expander(f"{head}　— {h.inferred_need}"):
-                if h.signal:
-                    st.caption(f"🫧 読み取ったサイン：{h.signal}")
-                st.markdown(f"**隠れたニーズ：** {h.inferred_need}")
-                if h.note:
-                    (st.info if h.surfaced else st.warning)(h.note)
-
-    if result.summary:
+    最上部は『次に直す1点』と、その裏づけになる場面（Before → After）だけ。
+    点数・会話配分・隠れたニーズ・攻略メモは畳んでおき、見たい人だけが開く。
+    見る項目が多いと何を改善すべきか分からなくなるため、既定では絞って見せる。
+    """
+    op = result.one_point
+    if op:
+        _one_point_card(op)
+    elif result.summary:
+        # 1ポイントが無い過去データは、従来どおり全体講評を先頭に出す。
         st.markdown("##### 全体の振り返り")
         st.success(result.summary)
 
-    _customer_profile(result.customer_profile)
-
     if result.feedback:
-        st.markdown("##### シーン別フィードバック（Before → After）")
-        for f in result.feedback:
-            c = settings.CRITERIA_BY_KEY.get(f.criterion_key)
-            label = f"{c.icon} {c.title}" if c else f.criterion_key
-            with st.expander(f"⏱ {f.timestamp}　{label}"):
-                if f.emotion_note:
-                    st.caption(f"💗 お客様の感情の動き：{f.emotion_note}")
-                if f.customer_line:
-                    st.caption(f"🗣 お客様の発言：「{f.customer_line}」")
-                col_b, col_a = st.columns(2)
-                with col_b:
-                    st.markdown("**Before（実際の営業トーク）**")
-                    if f.before:
-                        st.warning(f.before)
-                    else:
-                        st.caption("この場面の営業トークは特定できませんでした"
-                                   "（お客様の発言との取り違えを検出したため非表示）")
-                with col_a:
-                    st.markdown("**After（こう言えたら）**")
-                    st.info(f.after)
+        st.markdown("##### 🎬 決定的だった場面（Before → After）")
+        st.caption("この商談の分かれ目になった場面だけを抜き出しています。")
+        for i, f in enumerate(result.feedback):
+            _scene_feedback(f, expanded=(i == 0))
+
+    full = len(settings.EVALUATION_CRITERIA) * 5
+    with st.expander(f"📊 スコアの詳細（{result.overall_total} / {full}）と会話配分"):
+        # 総合スコア1本（旧2軸データは sales_score を総合として表示する）。
+        st.metric("🎯 総合スコア 合計", f"{result.overall_total} / {full}")
+
+        cols = st.columns(len(settings.EVALUATION_CRITERIA))
+        for col, c in zip(cols, settings.EVALUATION_CRITERIA):
+            s = result.score_for(c.key)
+            sales_s = s.sales_score if s else 0
+            sales_cmt = s.sales_comment if s else ""
+            with col:
+                st.markdown(
+                    f"""
+                    <div class="tk-card">
+                        <div class="tk-icon">{c.icon}</div>
+                        <h4><span class="tk-num">{c.number}</span> {c.title}</h4>
+                        {_score_badge(sales_s)}
+                        <p>{sales_cmt}</p>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
+        if result.johari:
+            _johari_meter(result.johari)
+
+    if result.hidden_needs:
+        with st.expander(f"🔍 お客様の隠れたニーズ（{len(result.hidden_needs)}件）"):
+            st.caption(
+                "お客様が言葉にしていない不安・疑問を、非言語サインから読み取ったものです。"
+                "✅＝営業が踏み込めた／⚠️＝表面で流した。"
+            )
+            for h in result.hidden_needs:
+                caught = "✅ 踏み込めた" if h.surfaced else "⚠️ 取りこぼし"
+                head = f"⏱ {h.timestamp}　{caught}" if h.timestamp else caught
+                st.markdown(f"**{head}　— {h.inferred_need}**")
+                if h.signal:
+                    st.caption(f"🫧 読み取ったサイン：{h.signal}")
+                if h.note:
+                    (st.info if h.surfaced else st.warning)(h.note)
+
+    if result.customer_profile:
+        with st.expander("🧭 このお客様の攻略メモ（次回の活かし方）"):
+            _customer_profile(result.customer_profile)
+
+    if op and result.summary:
+        with st.expander("📝 全体の振り返り"):
+            st.success(result.summary)
 
 
 def sidebar(user: dict) -> None:

@@ -228,3 +228,29 @@ def test_parroting_back_the_customer_is_not_flagged():
     }]}
     f = EvaluationResult.from_dict(data).feedback[0]
     assert f.before.startswith("デザインが重いかな、と感じられるんですね")
+
+
+def test_one_point_parsed_and_roundtrips():
+    """『次に直す1点』が復元でき、to_dict でも往復する。"""
+    data = {
+        "one_point": {
+            "headline": "商品説明の前に暮らしを2問聞く",
+            "timestamp": "05:12",
+            "reason": "5分過ぎからコーティングの説明が続き、お客様の相槌が短くなった。",
+            "action": "「差し支えなければ、普段のお掃除で一番大変なところを教えてください」",
+            "keep": "冒頭の自己紹介で施工実績を具体的に伝えられていた。",
+        },
+        "scores": [],
+    }
+    r = EvaluationResult.from_dict(data)
+    assert r.one_point is not None
+    assert r.one_point.headline == "商品説明の前に暮らしを2問聞く"
+    assert r.one_point.timestamp == "05:12"
+    assert "お掃除" in r.one_point.action
+    assert r.to_dict()["one_point"]["keep"].startswith("冒頭の自己紹介")
+
+
+def test_one_point_absent_is_none():
+    """過去データ（1ポイントが無い評価）でも壊れない。"""
+    assert EvaluationResult.from_dict({"scores": []}).one_point is None
+    assert EvaluationResult.from_dict({"one_point": {}, "scores": []}).one_point is None

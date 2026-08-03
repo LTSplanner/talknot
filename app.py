@@ -34,6 +34,7 @@ except Exception:
 
 from auth import google_oauth, persist, session  # noqa: E402
 from config import settings  # noqa: E402
+from core import meeting_context  # noqa: E402
 from core.models import EvaluationResult  # noqa: E402
 from services import drive_sa, gemini_analyzer, google_drive, storage, usage_log  # noqa: E402
 from ui import components, theme  # noqa: E402
@@ -185,6 +186,7 @@ def _analyze_worker(
     creds=None,
     file_id: str | None = None,
     suffix: str = ".mp4",
+    meeting_context: dict | None = None,
 ) -> None:
     """サーバーの裏で動く解析処理（st.* は一切使わない）。
 
@@ -204,6 +206,7 @@ def _analyze_worker(
                 tmp_path,
                 storage.get_reference_talk(),
                 storage.get_knowledge_base(),
+                meeting_context,
             )
         storage.finish_evaluation(user_email, job_id, result, label)
         # 商談から抽出した弊社ナレッジを蓄積（使うほど評価が弊社仕様に賢くなる）
@@ -248,15 +251,20 @@ def _run_analysis(uploaded, suffix: str, user: dict, label: str) -> None:
         uploaded.seek(0)
         shutil.copyfileobj(uploaded, tmp, length=8 * 1024 * 1024)
         tmp_path = tmp.name
-    _start_job(user, label, tmp_path=tmp_path)
+    ctx = meeting_context.build_meeting_context("", user.get("name", ""))
+    _start_job(user, label, tmp_path=tmp_path, meeting_context=ctx)
 
 
-def _start_drive_job(creds, file_id: str, user: dict, label: str) -> None:
+def _start_drive_job(
+    creds, file_id: str, user: dict, label: str, meeting_context: dict | None = None
+) -> None:
     """ドライブの録画を『ダウンロードから解析まで』丸ごと背景で実行する。
 
     ボタンを押した後は、ダウンロード中でも画面を閉じてOK（サーバー側で続行）。
+    meeting_context には営業担当・お客様などの確定情報を渡す（固有名詞の当て字防止）。
     """
-    _start_job(user, label, creds=creds, file_id=file_id, suffix=".mp4")
+    _start_job(user, label, creds=creds, file_id=file_id, suffix=".mp4",
+               meeting_context=meeting_context)
 
 
 def render_evaluate_tab(user: dict) -> None:
@@ -278,7 +286,7 @@ def render_evaluate_tab(user: dict) -> None:
         )
         if uploaded and st.button("AI で評価する"):
             suffix = Path(uploaded.name).suffix or ".mp4"
-            _run_analysis(uploaded, suffix, user, uploaded.name)
+            _run_analysis(uploaded, suffix, user, uploaded.name)  # 担当＝本人
     elif source.startswith("メンバー"):
         _render_member_drive_picker(user)
     elif source.startswith("📅"):
@@ -353,7 +361,10 @@ def _render_calendar_picker(creds, user: dict) -> None:
         st.success(f"🎥 録画が見つかりました：{rec.get('name','')[:60]}")
         st.caption(f"作成日：{rec.get('createdTime','')[:10]}")
         if st.button("AI で評価する", key="cal_eval", use_container_width=True):
-            _start_drive_job(creds, rec["id"], user, ev.get("summary", "")[:60])
+            # 予定タイトルは社内書式なので、お客様名・物件名・案件番号を確定情報として渡せる。
+            ctx = meeting_context.build_meeting_context(
+                ev.get("summary", ""), user.get("name", ""), ev.get("start_date", ""))
+            _start_drive_job(creds, rec["id"], user, ev.get("summary", "")[:60], ctx)
     else:
         st.warning(
             "この予定に対応する録画がドライブ内に見つかりませんでした。\n\n"
@@ -388,7 +399,10 @@ def _render_member_drive_picker(user: dict) -> None:
     labels = {f["id"]: f"{f['name']}　[{f.get('createdTime', '')[:10]}]" for f in files}
     file_id = st.selectbox("動画を選択", options=list(labels), format_func=lambda i: labels[i])
     if st.button("AI で評価する"):
-        _start_drive_job(creds, file_id, user, f"{member}｜{labels[file_id]}")
+        # 代理評価では、営業担当はログイン中の管理者ではなく選択したメンバー。
+        ctx = meeting_context.build_meeting_context(
+            "", google_drive.get_display_name(creds))
+        _start_drive_job(creds, file_id, user, f"{member}｜{labels[file_id]}", ctx)
 
 
 def _render_drive_picker(creds, user: dict) -> None:
@@ -427,7 +441,10 @@ def _render_drive_picker(creds, user: dict) -> None:
         "動画を選択", options=list(labels), format_func=lambda i: labels[i]
     )
     if st.button("AI で評価する"):
-        _start_drive_job(creds, file_id, user, labels[file_id])
+        # 自分のドライブ＝営業担当はログイン中の本人。ファイル名は商談タイトルとは
+        # 限らないため、お客様名・物件名は推測せず氏名だけを確定情報として渡す。
+        ctx = meeting_context.build_meeting_context("", user.get("name", ""))
+        _start_drive_job(creds, file_id, user, labels[file_id], ctx)
 
 
 def _reference_worker(
@@ -914,6 +931,7 @@ def _esc(text: str) -> str:
 def _roleplay_worker(
     job_id: str, user_email: str, label: str,
     audio_turns: list, scenario_lines: list, focus: str | None = None,
+    planner_name: str = "",
 ) -> None:
     """1人ロープレの録音をまとめて1回だけ Gemini で評価する（背景実行）。"""
     try:
@@ -924,6 +942,8 @@ def _roleplay_worker(
                 storage.get_knowledge_base(),
                 focus=focus,
                 persona=storage.get_customer_persona(),
+                # お客様は台本の架空ペルソナなので、確定情報は練習者の氏名だけ渡す。
+                meeting_context=meeting_context.build_meeting_context("", planner_name),
             )
         storage.finish_evaluation(user_email, job_id, result, label)
         storage.append_knowledge(result.knowledge)
@@ -988,7 +1008,8 @@ def _start_roleplay_job(user: dict, scenario: dict, audio_turns: list,
         target=_roleplay_worker,
         kwargs=dict(job_id=job_id, user_email=user["email"], label=label,
                     audio_turns=audio_turns, scenario_lines=lines,
-                    focus=scenario.get("focus")),
+                    focus=scenario.get("focus"),
+                    planner_name=user.get("name", "")),
         daemon=True,
     ).start()
 

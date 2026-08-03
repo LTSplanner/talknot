@@ -6,6 +6,54 @@
 from __future__ import annotations
 
 from config import settings
+from core import meeting_context as _mc
+
+
+def _meeting_context_block(context: dict | None) -> str:
+    """商談の『確定情報』（営業担当・お客様・物件）を、音声より優先する前提として渡す。
+
+    カレンダー予定と Workspace の表示名から確定できる固有名詞を明示することで、
+    聞き取りに頼った当て字（例「安栗」→「アングルリ」）を防ぐ。
+    """
+    if not isinstance(context, dict) or not context:
+        return ""
+
+    planner = (context.get("planner_name") or "").strip()
+    customer = (context.get("customer_name") or "").strip()
+    prop = (context.get("property_name") or "").strip()
+    case_id = (context.get("case_id") or "").strip()
+    date = (context.get("meeting_date") or "").strip()
+
+    rows = []
+    if planner:
+        rows.append(f"- 営業担当（＝評価対象。ライフタイムサポート側）：{planner}")
+    if customer:
+        rows.append(f"- お客様：{customer}")
+    if prop:
+        rows.append(f"- 物件：{prop}")
+    meta = "／".join(
+        x for x in (f"案件番号 {case_id}" if case_id else "",
+                    f"実施日 {date}" if date else "") if x
+    )
+    if meta:
+        rows.append(f"- {meta}")
+    if not rows:
+        return ""
+
+    names = "／".join(f"「{n}」" for n in _mc.known_names(context))
+    who = (
+        f"\n★どちらが営業担当かは上の情報で確定しています。自己紹介・提案・見積り案内を"
+        f"している側が {planner} です。"
+        if planner else ""
+    )
+    return f"""
+# この商談の確定情報（固有名詞はこの表記だけを使う）
+{chr(10).join(rows)}
+★これは録画の音声よりも優先する確定情報です。{names} は必ずこの表記で書いてください。
+  音から起こしたカタカナの当て字（例「アングルリ」のような誤記）は禁止です。
+★ここに無い人名（ご家族・他社の担当者など）は、音で当て字を作らず「ご主人様」「奥様」
+  「お母様」「ご担当者様」などの役割呼称で書いてください。{who}
+"""
 
 
 def _persona_block(persona: dict | None) -> str:
@@ -35,13 +83,18 @@ def build_roleplay_prompt(
     knowledge_base: str | None = None,
     focus: str | None = None,
     persona: dict | None = None,
+    meeting_context: dict | None = None,
 ) -> str:
     """1人ロープレ（台本のお客様 × 音声で応答）の評価プロンプト。
 
     添付音声は「営業役（練習者）の発話だけ」。お客様のセリフは下の台本で進行している。
     評価の構造は通常の商談評価と同じ JSON に揃える（履歴・UIをそのまま使うため）。
+    meeting_context には練習者の氏名を入れる（お客様は台本の架空ペルソナなので入れない）。
     """
-    base = build_evaluation_prompt(reference_talk=talk_script, knowledge_base=knowledge_base)
+    base = build_evaluation_prompt(
+        reference_talk=talk_script, knowledge_base=knowledge_base,
+        meeting_context=meeting_context,
+    )
     lines = "\n".join(f"{i+1}. お客様「{t}」" for i, t in enumerate(scenario_lines))
     focus_block = _focus_block(focus) + _persona_block(persona)
     script_note = (
@@ -72,6 +125,7 @@ def _focus_block(focus: str | None) -> str:
 def build_evaluation_prompt(
     reference_talk: str | None = None,
     knowledge_base: str | None = None,
+    meeting_context: dict | None = None,
 ) -> str:
     criteria_lines = "\n".join(
         f"- {c.key} ({c.number} {c.title}): {c.description}"
@@ -86,10 +140,12 @@ def build_evaluation_prompt(
         if knowledge_base
         else ""
     )
+    context_block = _meeting_context_block(meeting_context)
     return f"""{settings.SALES_AI_PERSONA}
 
 ★出力する文章はすべて日本語で書いてください（scores のコメント、hidden_needs の
 signal・inferred_need・note、feedback、summary を含め、英語を混ぜない）。
+{context_block}
 
 動画（または音声）から、文字面だけでなく「声のトーン」「間」「発話比率」、さらに
 言い淀み・沈黙・話題の回避・過剰な同意・即答できない様子・声の小ささなどの
@@ -166,6 +222,18 @@ signal・inferred_need・note、feedback、summary を含め、英語を混ぜ�
 - その場面で営業担当が実際には何も返していない（沈黙・話題が流れた）場合は、before に
   お客様の言葉を入れて埋めず、**その feedback 項目自体を出さない**。
 
+# 発言の書き起こし精度（customer_line / before / after の文言）
+- customer_line と before は **実際に話された言葉のまま** 書く。要約・言い換え・敬語の
+  整形をしない（after だけが改善案の作文）。
+- 聞き取れない箇所は無理に埋めず「…（聞き取り不明）」と書く。音が似ているだけの語を
+  当てはめない。1文まるごと不確かなら、その feedback 項目自体を出さない。
+- 弊社・商材の正式表記に必ず合わせる：ライフタイムサポート／フロアコーティング／
+  エコカラット／ダウンライト／内覧会／お引渡し／オプション。音が近い別語（例「エコガラス」）
+  に置き換えない。
+- 人名・物件名は上の『確定情報』の表記に必ず合わせる。確定情報に無い固有名詞は、
+  聞こえた音からカタカナの当て字を作らず、役割呼称（ご主人様・奥様 等）で書く。
+- 金額・畳数・日付などの数字は、はっきり聞き取れたときだけ書く。曖昧なら書かない。
+
 # 会話が成立していない商談の扱い（無理に評価しない）
 言語の壁でほとんど通じていない／お客様がほとんど発話していない／画面OFFで非言語の手がかりも
 乏しい 等、実質的な商談の会話が成立していない場合は、**無理に人物像やニーズを作り出さない**：
@@ -178,6 +246,13 @@ signal・inferred_need・note、feedback、summary を含め、英語を混ぜ�
 
 # 出力フォーマット（JSON のみ。前後に説明文を付けない）
 {{
+  "one_point": {{
+    "headline": "<この商談で次に直す1点。行動で20字程度。例『商品説明の前に暮らしを2問聞く』>",
+    "timestamp": "MM:SS",
+    "reason": "<なぜそこか＋その結果お客様がどうなったか。1〜2文>",
+    "action": "<次回そのまま言える具体的なセリフ。「〜」の形で1〜2文>",
+    "keep": "<続けてほしい良かった点を1つだけ・具体的に>"
+  }},
   "hidden_needs": [{{
     "timestamp": "MM:SS",
     "signal": "<根拠となった非言語サイン（間・トーン・言い淀み・話題回避など）>",
@@ -219,11 +294,31 @@ signal・inferred_need・note、feedback、summary を含め、英語を混ぜ�
   }}]
 }}
 
-hidden_needs は 0〜5件。確かな非言語サインの根拠があるものだけを挙げ、無理に件数を
-満たさない（該当が無ければ空配列 [] でよい）。根拠の弱い憶測は書かない。
+hidden_needs は **0〜3件**。確かな非言語サインの根拠があるものだけを、受注への影響が
+大きい順に挙げ、無理に件数を満たさない（該当が無ければ空配列 [] でよい）。
+根拠の弱い憶測は書かない。
 各項目について sales_score（総合スコア）と sales_comment（総合講評）を必ず出し、上のアンカーで採点してください。reference_score は sales_score と同じ値をミラーで入れ、reference_comment は空文字 "" にしてください（キーは過去データとの互換のために残しているだけです）。
-feedback は必ず動画内の具体的なタイムスタンプ付きで、Before/After をセットで出してください。
-講評（コメント）の“言葉”は前向き・建設的に、しかし“点数”は甘くしないこと。
+
+# 【最重要】アウトプットは「読んだ翌日にすぐ直せる」量に絞る
+分析は隅々まで綿密に行うが、**書き出すのは絞り込んだ要点だけ**にする。項目が多いと
+何を直せばよいか分からなくなり、次の商談で改善されない。抽象論を捨て、具体的な
+セリフで示すこと。
+
+- one_point（次に直す1点）が最重要の出力。**この商談で最も受注に効いた欠け**を1つだけ選ぶ。
+  - headline：直す行動を20字程度で（例「商品説明の前に暮らしを2問聞く」）。
+  - reason：なぜそこか＋その結果お客様がどうなったかを1〜2文。MM:SS を1つ添える。
+  - action：次回そのまま口に出せる**具体的なセリフ**（「〜」の形で1〜2文）。
+  - keep：続けてほしい良かった点を1つだけ、具体的に。
+  複数の課題があっても**必ず1つに絞る**（優先度は「受注への影響が大きい順」）。
+- feedback は **3〜5件だけ**。1点アドバイスを裏づける決定的な場面に限る。
+  網羅は不要で、同種の指摘を繰り返さない。会話が成立していない商談では無理に出さない。
+  各件は customer_line → before → after のセットで、after は**そのまま言えるセリフ**にする。
+  emotion_note は「声のトーン・間・相槌の変化」など観測した事実を短く（40字以内）。
+- sales_comment は **60〜100字**。①MM:SS の場面 ②できていたこと／足りなかったこと
+  ③次の一言、を短く詰める。抽象語（「傾聴できていた」「深掘りを」）だけで終えない。
+- summary は **150字以内**。良かった点1つ＋次の重点1つに絞る。
+- johari.comment は **60字以内**。配分の事実と、次に増やすべき領域だけ書く。
+- 講評（コメント）の“言葉”は前向き・建設的に、しかし“点数”は甘くしないこと。
 
 knowledge には、この商談から抽出できる『弊社の財産になる知識』を 0〜5 件入れてください。
 - product（商品知識）/ rule（社内ルール）/ technique（トーク技術）の3カテゴリで、学びがあるものだけ。

@@ -168,6 +168,21 @@ class CustomerProfile:
 
 
 @dataclass
+class OnePoint:
+    """この商談で『次に直す1点』だけを絞り込んだアドバイス。
+
+    点数・ジョハリ・シーン別フィードバックまで全部読むと何をすればいいか分からなく
+    なるため、結果画面の一番上でこれだけを大きく見せる。詳細は下に畳んでおく。
+    過去データには無いため EvaluationResult では任意項目。
+    """
+    headline: str = ""    # 直す1点の見出し（20字程度・行動で書く）
+    timestamp: str = ""   # そう判断した代表的な場面 "MM:SS"
+    reason: str = ""      # なぜそこか（その結果お客様がどうなったか）1〜2文
+    action: str = ""      # 次回そのまま使える具体的な一言（セリフ）
+    keep: str = ""        # 逆に、続けてほしい良かった点1つ
+
+
+@dataclass
 class TimestampedFeedback:
     """『動画の何分何秒のトーク』単位の Before/After フィードバック。"""
     timestamp: str          # "MM:SS"
@@ -187,6 +202,7 @@ class EvaluationResult:
     summary: str = ""        # 全体講評（ポジティブな振り返り）
     knowledge: list[KnowledgeItem] = field(default_factory=list)  # 抽出した弊社ナレッジ
     customer_profile: "CustomerProfile | None" = None  # お客様の攻略メモ（次回の活かし方）
+    one_point: "OnePoint | None" = None  # 次に直す1点（結果画面の最上部に出す要約）
 
     @property
     def total(self) -> int:
@@ -297,6 +313,17 @@ class EvaluationResult:
                 next_approach=cp.get("next_approach") or "",
             )
 
+        one_point = None
+        op = data.get("one_point")
+        if isinstance(op, dict) and (op.get("headline") or op.get("action")):
+            one_point = OnePoint(
+                headline=op.get("headline") or "",
+                timestamp=op.get("timestamp") or "",
+                reason=op.get("reason") or "",
+                action=_strip_speaker(op.get("action") or ""),
+                keep=op.get("keep") or "",
+            )
+
         return cls(
             scores=[cls._parse_score(s) for s in data.get("scores", [])],
             johari=johari,
@@ -322,6 +349,7 @@ class EvaluationResult:
                 if k.get("point")
             ],
             customer_profile=customer_profile,
+            one_point=one_point,
         )
 
     def to_dict(self) -> dict:
@@ -333,4 +361,5 @@ class EvaluationResult:
             "summary": self.summary,
             "knowledge": [vars(k) for k in self.knowledge],
             "customer_profile": vars(self.customer_profile) if self.customer_profile else None,
+            "one_point": vars(self.one_point) if self.one_point else None,
         }
