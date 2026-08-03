@@ -1,32 +1,58 @@
 """KNOTE のビジュアルアイデンティティ（カラー・フォント・CSS）。
 
 コンセプト：Talk（話す）＋ Knot（結び目・絆）。
-ふたりの会話が結ばれていくイメージを、コーラル→インディゴのグラデーションで表現。
+配色はライフタイムサポートのコーポレートカラー（PANTONE 7451M ／
+RGB 155-180-200 ＝ #9BB4C8 のダスティブルー）を軸にした、落ち着いた信頼感のトーン。
+
+■ 色の使い分け（重要）
+ブランド原色 #9BB4C8 は淡いため、**白地の文字には使えない**（コントラスト 2.15:1）。
+そこで「面に敷く色」と「文字・線に使う色」を分けている：
+  - BRAND      … 帯・メーター・ロゴ地など**面**に敷く（文字色には使わない）
+  - BRAND_DEEP … 文字・アイコン・枠線に使う濃度（白地で 5.19:1 ＝ AA 合格）
+  - BRAND_INK  … 見出し・ヒーローの濃い端（白地で 7.76:1）
+差し色（ACCENT / ATTENTION / POSITIVE）も、白地・クリーム地の両方で
+本文コントラスト AA（4.5:1）を満たす濃度に調整済み。色を足すときも同じ基準で選ぶこと。
 """
 from __future__ import annotations
 
 import streamlit as st
 
-# --- ブランドカラー ---
-CORAL = "#FF6F61"      # 会話のあたたかさ
-INDIGO = "#6C5CE7"     # 信頼・深まり
-SUNNY = "#FFC36B"      # ワクワク・期待
-TEAL = "#2BC4A6"       # 高評価・達成
-CREAM = "#FFF9F4"      # 背景
-INK = "#2D2A32"        # 文字
-MUTED = "#8C8794"      # 補助文字
-GRADIENT = f"linear-gradient(120deg, {CORAL} 0%, {INDIGO} 100%)"
+# --- コーポレートカラー（PANTONE 7451M）---
+BRAND = "#9BB4C8"       # 原色：ロゴのダスティブルー。面に敷く用
+BRAND_SOFT = "#C9D8E4"  # 淡い面（帯の明るい端・ホバー）
+BRAND_DEEP = "#4E7189"  # 文字・線に使える濃度（白地 5.19:1）
+BRAND_INK = "#35566E"   # 見出し・グラデーションの濃い端（白地 7.76:1）
+
+# --- 差し色（ブランドのダスティブルーと調和する彩度に落としたもの）---
+ACCENT = "#AE5943"      # 気づき・注目（テラコッタ。白地 4.87:1）
+ATTENTION = "#8E6A2A"   # 途中・要注意（サンド。白地 4.95:1）
+POSITIVE = "#3F7365"    # 達成・高評価（セージ。白地 5.45:1）
+
+CREAM = "#FAF8F4"       # 背景（ロゴ台紙のオフホワイト）
+INK = "#263238"         # 本文
+MUTED = "#6B7884"       # 補助文字（白地 4.52:1）
+GRADIENT = f"linear-gradient(120deg, {BRAND} 0%, {BRAND_INK} 100%)"
+# 白文字を乗せる面（ヒーロー帯・ボタン）専用。淡い端を使うと白文字が読めなくなるため、
+# 濃い側だけでグラデーションを作る（白文字コントラスト 5.19:1〜7.76:1）。
+GRADIENT_ON_DARK = f"linear-gradient(120deg, {BRAND_DEEP} 0%, {BRAND_INK} 100%)"
+
+# 旧名との互換（既存の呼び出しを壊さないための別名）。
+# 新しく書くコードでは上のブランド名（BRAND_DEEP など）を使うこと。
+INDIGO = BRAND_DEEP
+CORAL = ACCENT
+SUNNY = ATTENTION
+TEAL = POSITIVE
 
 
 def score_color(score: int) -> str:
     """1〜5 のスコアを段階的な色にマッピングする。"""
     if score >= 5:
-        return TEAL
+        return POSITIVE
     if score >= 4:
-        return INDIGO
+        return BRAND_DEEP
     if score >= 3:
-        return SUNNY
-    return CORAL
+        return ATTENTION
+    return ACCENT
 
 
 _CSS = f"""
@@ -39,8 +65,8 @@ html, body, [class*="css"] {{
 }}
 .stApp {{
     background:
-        radial-gradient(900px 360px at 88% -8%, {SUNNY}22, transparent 60%),
-        radial-gradient(800px 380px at -6% 6%, {CORAL}1f, transparent 55%),
+        radial-gradient(900px 360px at 88% -8%, {BRAND}33, transparent 60%),
+        radial-gradient(800px 380px at -6% 6%, {BRAND_SOFT}3d, transparent 55%),
         {CREAM};
 }}
 
@@ -48,11 +74,11 @@ html, body, [class*="css"] {{
 .tk-hero {{
     position: relative;
     overflow: hidden;
-    background: {GRADIENT};
+    background: {GRADIENT_ON_DARK};
     border-radius: 26px;
     padding: 2.6rem 2.8rem;
     color: #fff;
-    box-shadow: 0 18px 46px rgba(108, 92, 231, 0.28);
+    box-shadow: 0 18px 46px rgba(53, 86, 110, 0.26);
     margin-bottom: 1.7rem;
 }}
 .tk-hero::after {{
@@ -88,8 +114,8 @@ html, body, [class*="css"] {{
     background: #fff;
     border-radius: 20px;
     padding: 1.5rem 1.4rem 1.3rem;
-    box-shadow: 0 6px 22px rgba(45, 42, 50, 0.07);
-    border: 1px solid rgba(108, 92, 231, 0.08);
+    box-shadow: 0 6px 22px rgba(38, 50, 56, 0.07);
+    border: 1px solid rgba(78, 113, 137, 0.12);
     height: 100%;
     transition: transform .14s ease, box-shadow .2s ease;
 }}
@@ -99,12 +125,12 @@ html, body, [class*="css"] {{
 }}
 .tk-card:hover {{
     transform: translateY(-4px);
-    box-shadow: 0 14px 32px rgba(108, 92, 231, 0.16);
+    box-shadow: 0 14px 32px rgba(78, 113, 137, 0.18);
 }}
 .tk-card h4 {{ margin: 0.3rem 0 0.45rem; font-size: 1.02rem; font-weight: 700; }}
 .tk-card p {{ margin: 0; color: {MUTED}; font-size: 0.88rem; line-height: 1.55; }}
 .tk-card .tk-icon {{ font-size: 1.9rem; }}
-.tk-num {{ color: {CORAL}; font-weight: 700; }}
+.tk-num {{ color: {BRAND_DEEP}; font-weight: 700; }}
 
 /* --- ボタン --- */
 .stButton > button, .stLinkButton > a {{
@@ -112,13 +138,13 @@ html, body, [class*="css"] {{
     border: none;
     padding: 0.6rem 1.5rem;
     font-weight: 700;
-    background: {GRADIENT};
+    background: {GRADIENT_ON_DARK};
     color: #fff !important;
     transition: transform .08s ease, box-shadow .2s ease;
 }}
 .stButton > button:hover, .stLinkButton > a:hover {{
     transform: translateY(-1px);
-    box-shadow: 0 10px 24px rgba(108, 92, 231, 0.32);
+    box-shadow: 0 10px 24px rgba(78, 113, 137, 0.32);
     color: #fff !important;
 }}
 
@@ -126,11 +152,11 @@ html, body, [class*="css"] {{
 .stTabs [data-baseweb="tab-list"] {{ gap: 0.45rem; }}
 .stTabs [data-baseweb="tab"] {{
     border-radius: 999px; padding: 0.35rem 1.05rem; background: #fff;
-    border: 1px solid rgba(108,92,231,.1);
+    border: 1px solid rgba(78,113,137,.14);
 }}
 .stTabs [aria-selected="true"] {{
-    background: {CORAL}1a; color: {CORAL};
-    border-color: {CORAL}55;
+    background: {BRAND_DEEP}14; color: {BRAND_DEEP};
+    border-color: {BRAND_DEEP}55;
 }}
 
 #MainMenu, footer {{ visibility: hidden; }}

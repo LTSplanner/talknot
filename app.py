@@ -737,7 +737,7 @@ def _render_member_dashboard(who: str, records: list[dict]) -> None:
         st.bar_chart(pd.DataFrame(
             {"回数": [len(roleplay), len(meeting)]},
             index=["🎙️ロープレ", "🎥商談評価"],
-        ), height=240, color="#6C5CE7")
+        ), height=240, color="#4E7189")
     with g2:
         # 直近の完了評価の「5項目 × 営業プロ視点」を棒で
         latest = scored[-1][1] if scored else None
@@ -749,7 +749,7 @@ def _render_member_dashboard(who: str, records: list[dict]) -> None:
                 rows[(c.title if c else s.get("key", ""))] = int(s.get("sales_score") or 0)
             if rows:
                 st.bar_chart(pd.DataFrame({"点": rows.values()}, index=list(rows)),
-                             height=240, color="#FF6F61")
+                             height=240, color="#AE5943")
         else:
             st.caption("完了した評価がまだありません。")
 
@@ -847,14 +847,14 @@ def _customer_bubble(text: str, ctype: str) -> None:
         f"""
         <div style="display:flex;gap:.9rem;align-items:flex-start;margin:.6rem 0 .2rem">
           <div style="flex:none;width:64px;height:64px;border-radius:50%;
-                      background:linear-gradient(135deg,#FFE7E2,#EDE9FF);
+                      background:linear-gradient(135deg,#E3EDF4,#CFDDE8);
                       display:flex;align-items:center;justify-content:center;font-size:2rem;
                       box-shadow:0 2px 10px rgba(0,0,0,.08);animation:tkbob 2.6s ease-in-out infinite">
             {face}
           </div>
           <div style="flex:1">
-            <div style="font-size:.78rem;color:#8C8794;margin-bottom:.2rem">{name}</div>
-            <div style="position:relative;background:#fff;border:1px solid #EFE9F5;
+            <div style="font-size:.78rem;color:#6B7884;margin-bottom:.2rem">{name}</div>
+            <div style="position:relative;background:#fff;border:1px solid #E1E8ED;
                         border-radius:14px;padding:.8rem 1rem;white-space:pre-wrap;
                         line-height:1.75;font-size:1.02rem;
                         box-shadow:0 2px 12px rgba(0,0,0,.06)">{_esc(text)}</div>
@@ -892,7 +892,7 @@ def _speak(text: str, key: str, auto: bool = False, nonce: int = 0) -> None:
         auto_js = "/* 自動再生しない */"
     st_components.html(
         f"""
-        <button id="sp{key}" style="cursor:pointer;border:1px solid #6C5CE7;color:#6C5CE7;
+        <button id="sp{key}" style="cursor:pointer;border:1px solid #4E7189;color:#4E7189;
           background:#fff;border-radius:999px;padding:.4rem 1rem;font-size:.9rem;font-weight:600">
           🔊 もう一度きく
         </button>
@@ -1255,7 +1255,7 @@ def render_roleplay_tab(user: dict) -> None:
             if show:
                 # Markdown は単一改行を無視するため、行末に空白2つを足して改行を保つ
                 st.markdown(
-                    '<div style="background:#EEF3FF;border-left:4px solid #6C5CE7;'
+                    '<div style="background:#EDF3F7;border-left:4px solid #4E7189;'
                     'padding:.7rem 1rem;border-radius:8px;white-space:pre-wrap;'
                     'line-height:1.7;font-size:.93rem">' + _esc(hint) + "</div>",
                     unsafe_allow_html=True,
@@ -1273,12 +1273,12 @@ def render_roleplay_tab(user: dict) -> None:
                                 or "")
                 if nxt_line:
                     st.markdown(
-                        '<div style="background:#FFF3E9;border-left:4px solid #FF6F61;'
+                        '<div style="background:#F7EFE9;border-left:4px solid #AE5943;'
                         'padding:.6rem .95rem;border-radius:8px;margin-top:.5rem;'
                         'font-size:.9rem;line-height:1.7">'
                         '🎯 <b>次への橋渡し</b><br>この後お客様はこう来ます：「'
                         + _esc(nxt_line) + '」<br>'
-                        '<span style="color:#8B8397">→ 今の一言を、この反応へ自然につながる'
+                        '<span style="color:#6B7884">→ 今の一言を、この反応へ自然につながる'
                         '方向で。迷ったら「この一文に着地させる」イメージで話しましょう。</span></div>',
                         unsafe_allow_html=True,
                     )
@@ -1429,7 +1429,7 @@ def _render_unit_admin() -> None:
                     prev_hint = (applied[ti].get("hint") or "").strip()
                     if prev_hint:
                         st.markdown(
-                            '<div style="background:#EEF3FF;border-left:4px solid #6C5CE7;'
+                            '<div style="background:#EDF3F7;border-left:4px solid #4E7189;'
                             'padding:.7rem 1rem;border-radius:8px;white-space:pre-wrap;'
                             'line-height:1.7;font-size:.9rem">' + _esc(prev_hint) + "</div>",
                             unsafe_allow_html=True,
