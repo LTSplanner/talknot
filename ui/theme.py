@@ -104,6 +104,16 @@ html, body, [class*="css"] {{
     font-size: 0.78rem; letter-spacing: 0.22em; opacity: 0.72;
     align-self: flex-end; padding-bottom: 0.5rem;
 }}
+/* ロゴと製品名のあいだの細い区切り（社章とツール名を分けて見せる） */
+.tk-divider {{
+    width: 1px; align-self: stretch; margin: 0 .35rem;
+    background: rgba(255,255,255,0.32);
+}}
+/* 白地（サイドバー）で白抜きロゴを見せるためのブランド色タイル */
+.tk-logo-tile {{
+    display: inline-flex; align-items: center; justify-content: center;
+    background: {BRAND}; border-radius: 8px; padding: .3rem .45rem;
+}}
 .tk-hero.compact .tk-logo {{ font-size: 1.9rem; }}
 .tk-hero.compact .tk-reading {{ font-size: 0.68rem; padding-bottom: 0.25rem; }}
 .tk-tagline {{ font-size: 1.08rem; opacity: 0.96; margin-top: 0.5rem; font-weight: 500; }}

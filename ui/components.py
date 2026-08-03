@@ -1,11 +1,40 @@
 """KNOTE 共通 UI コンポーネント（ロゴ・ヒーロー・評価項目カードなど）。"""
 from __future__ import annotations
 
+import base64
+from pathlib import Path
+
 import streamlit as st
 
 from config import settings
 from core.models import EvaluationResult
 from ui import theme
+
+# ライフタイムサポートのロゴ（白抜き・背景透過）。濃いブランド色の面に重ねて使う。
+# 元データは青地のSNS用ロゴ（assets/lts_logo_tile.jpg）で、地色を抜いて作成した。
+_LOGO_PATH = Path(__file__).resolve().parent.parent / "assets" / "lts_logo_white.png"
+
+
+@st.cache_data(show_spinner=False)
+def _logo_data_uri() -> str:
+    """ロゴを data URI で返す（HTML に直接埋めるため）。無ければ空文字。"""
+    try:
+        return "data:image/png;base64," + base64.b64encode(
+            _LOGO_PATH.read_bytes()).decode("ascii")
+    except OSError:
+        return ""
+
+
+def _logo_img(height_px: int, opacity: float = 1.0) -> str:
+    """白抜きロゴの img タグ。ロゴ画像が無ければ従来の結び目マークで代替する。"""
+    uri = _logo_data_uri()
+    if not uri:
+        return KNOT_MARK.format(size=height_px)
+    return (
+        f'<img src="{uri}" alt="Life time support" '
+        f'style="height:{height_px}px;width:auto;display:block;flex:none;'
+        f'opacity:{opacity}">'
+    )
 
 
 # ブランドマーク：ヒモではなく、一本の線が交差する幾何学的な「結び目」。
@@ -21,17 +50,22 @@ KNOT_MARK = (
 
 
 def hero(subtitle: str | None = None, compact: bool = False) -> None:
-    """ブランドロゴ入りのヒーローヘッダー。"""
+    """ヒーローヘッダー。ライフタイムサポートのロゴと製品名 KNOTE を併記する。
+
+    社章（Life time support）が会社、KNOTE が社内ツール名という関係なので、
+    ロゴを左に置き、製品名をその右に並べる co-brand の並びにしている。
+    """
     tagline = (
         f'<div class="tk-tagline">{subtitle}</div>' if subtitle and not compact else ""
     )
     klass = "tk-hero compact" if compact else "tk-hero"
-    size = 34 if compact else 52
+    logo_h = 38 if compact else 64
     st.markdown(
         f"""
         <div class="{klass}">
             <div class="tk-brand">
-                {KNOT_MARK.format(size=size)}
+                {_logo_img(logo_h)}
+                <span class="tk-divider"></span>
                 <h1 class="tk-logo notranslate" translate="no">KNOTE</h1>
                 <span class="tk-reading notranslate" translate="no">ノート</span>
             </div>
@@ -350,10 +384,13 @@ def evaluation_result(result: EvaluationResult) -> None:
 def sidebar(user: dict) -> None:
     """ログイン中ユーザー情報とナビゲーションを表示するサイドバー。"""
     with st.sidebar:
-        st.markdown(f'<div class="tk-brand" style="color:{theme.INDIGO}">'
-                    f'{KNOT_MARK.format(size=22)}'
-                    '<span class="notranslate" translate="no" style="font-weight:700;font-size:1.25rem;letter-spacing:-.03em">KNOTE</span></div>',
-                    unsafe_allow_html=True)
+        # サイドバーは白地なので、白抜きロゴはブランド色のタイルに載せて見せる。
+        st.markdown(
+            f'<div class="tk-brand" style="color:{theme.BRAND_DEEP}">'
+            f'<span class="tk-logo-tile">{_logo_img(26)}</span>'
+            '<span class="notranslate" translate="no" style="font-weight:700;'
+            'font-size:1.25rem;letter-spacing:-.03em">KNOTE</span></div>',
+            unsafe_allow_html=True)
         st.divider()
         st.markdown(f"**{user.get('name', 'ゲスト')}**")
         st.caption(user.get("email", ""))
