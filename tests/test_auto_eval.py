@@ -128,3 +128,16 @@ class TestSelectTargets:
 
     def test_empty_candidates(self):
         assert auto_eval.select_targets([], set(), 5) == []
+
+
+def test_spec_meetings_are_excluded():
+    """「初回仕様MT」は初回だが商談ではないので自動評価しない。"""
+    assert not auto_eval.is_first_meeting("初回仕様MT オンライン L260707478901　安宮綾水様｜バウス加賀324号室")
+    assert not auto_eval.is_first_meeting("初回仕様MT SR L260615468701　山崎光様")
+    assert not auto_eval.is_first_meeting("仕様打ち合わせ L260615468701　山崎光様")
+
+
+def test_real_first_meetings_are_still_targeted():
+    """商談のタイトルはこれまでどおり対象のまま。"""
+    assert auto_eval.is_first_meeting("◎初回商談 オンライン L260726486501　矢野淳也様｜江戸川区新築マンション")
+    assert auto_eval.is_first_meeting("初回商談 SR L260722484601　福島慶紀様｜朝霞市三原3丁目")

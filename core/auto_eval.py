@@ -14,17 +14,27 @@ import re
 # 予定タイトルが「初回商談」であることを示す語（これを含むものだけ自動評価する）。
 _FIRST_MEETING_KEYWORD = "初回"
 
+# 「初回仕様MT」など仕様の打ち合わせは自動評価しない。
+# タイトルに「初回」が入るため以前は対象に混ざっていたが、商談ではなく
+# 仕様を詰める打合せなので、営業トークの評価軸に合わない。
+_EXCLUDE_KEYWORDS = ("仕様",)
+
 # 案件番号（例: L260721484101）。全角Ｌ・間の空白も許容。google_calendar と同じ形。
 _CASE_ID_RE = re.compile(r"[LＬ]\s*\d{6,}")
 
 
 def is_first_meeting(summary: str) -> bool:
-    """予定タイトルが『初回商談』か（タイトルに「初回」を含むか）。
+    """予定タイトルが自動評価の対象（初回商談）か。
+
+    「初回」を含み、かつ「仕様」を含まないものだけを対象にする。
+    「初回仕様MT」は初回だが商談ではなく仕様を詰める打合せなので除外する。
 
     案件番号（L付き）かどうかは list_meetings 側（deals_only）で既に絞られている想定。
-    ここでは「初回」語の有無だけを判定する。
     """
-    return _FIRST_MEETING_KEYWORD in (summary or "")
+    text = summary or ""
+    if any(w in text for w in _EXCLUDE_KEYWORDS):
+        return False
+    return _FIRST_MEETING_KEYWORD in text
 
 
 def _norm_case_id(case_id: str) -> str:
