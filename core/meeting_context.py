@@ -74,6 +74,42 @@ def build_meeting_context(
     return ctx
 
 
+# セリフに残ってしまう「お客様名の空欄」。そのままでは読み上げられない。
+_PLACEHOLDER_RE = re.compile(
+    r"[（(]?(?:〇〇|○○|◯◯|△△|××|XX|xx|ＸＸ|お客様名|顧客名)[）)]?\s*(?=様)"
+)
+
+
+def fill_customer_placeholders(obj, customer_name: str):
+    """評価結果の中の「〇〇様」を、確定しているお客様の姓＋様に置き換える。
+
+    プロンプトでも実名で書くよう指示しているが、モデルは実行ごとにブレて
+    プレースホルダのまま出すことがある。改善案のセリフ（after / one_point.action）は
+    そのまま口に出せることが価値なので、コード側でも直す。
+
+    customer_name は「矢野淳也様」のような形を想定し、姓（先頭2文字）を使う。
+    姓が判断できない短い名前のときは、渡された名前をそのまま使う。
+    """
+    name = _clean(customer_name).rstrip("様")
+    if not name:
+        return obj
+    surname = name[:2] if len(name) >= 3 else name
+
+    def _fix(text: str) -> str:
+        return _PLACEHOLDER_RE.sub(surname, text)
+
+    def _walk(o):
+        if isinstance(o, str):
+            return _fix(o)
+        if isinstance(o, dict):
+            return {k: _walk(v) for k, v in o.items()}
+        if isinstance(o, list):
+            return [_walk(v) for v in o]
+        return o
+
+    return _walk(obj)
+
+
 def known_names(context: dict | None) -> list[str]:
     """確定情報に含まれる『正しい表記の固有名詞』を列挙する（プロンプト用）。"""
     if not isinstance(context, dict):

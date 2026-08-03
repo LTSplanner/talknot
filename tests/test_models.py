@@ -1,4 +1,5 @@
 """EvaluationResult の JSON ラウンドトリップと補助メソッドのテスト。"""
+from config import settings
 from core.models import EvaluationResult
 
 SAMPLE = {
@@ -254,3 +255,52 @@ def test_one_point_absent_is_none():
     """過去データ（1ポイントが無い評価）でも壊れない。"""
     assert EvaluationResult.from_dict({"scores": []}).one_point is None
     assert EvaluationResult.from_dict({"one_point": {}, "scores": []}).one_point is None
+
+
+def test_industry_term_mishearings_are_fixed():
+    """音声認識が業界用語を同音の一般語にした場合、コード側で直す。
+
+    新築インテリアオプションの用語（入隅・角）は一般語に誤変換されやすく、
+    プロンプトだけに任せると残ってしまうため。
+    """
+    data = {
+        "scores": [],
+        "feedback": [{
+            "timestamp": "00:43",
+            "criterion_key": "emotion_catch",
+            "emotion_note": "受け身な様子",
+            "customer_line": "ここの入り墨はどうなりますか",
+            "before": "お部屋の入り墨ですね。門になる部分から60cmで",
+            "after": "入隅の納まりをご説明しますね",
+        }],
+    }
+    f = EvaluationResult.from_dict(data).feedback[0]
+    assert f.before == "お部屋の入隅ですね。角になる部分から60cmで"
+    assert f.customer_line == "ここの入隅はどうなりますか"
+
+
+def test_term_fix_applies_to_summary_and_one_point():
+    """要約や1ポイントアドバイスの文中でも同じ補正がかかる。"""
+    r = EvaluationResult.from_dict({
+        "scores": [],
+        "summary": "エコガラスの提案が良かった",
+        "one_point": {"headline": "入り墨の説明を先に", "action": "「入り墨から測ります」"},
+    })
+    assert r.summary == "エコカラットの提案が良かった"
+    assert r.one_point.headline == "入隅の説明を先に"
+    assert "入隅" in r.one_point.action
+
+
+def test_hidden_needs_capped_to_limit():
+    """モデルが上限を超えて出しても、重要な順に上限まで採る（読む量を一定に保つ）。"""
+    data = {
+        "scores": [],
+        "hidden_needs": [
+            {"timestamp": f"0{i}:00", "signal": "間", "inferred_need": f"不安{i}",
+             "surfaced": False, "note": ""}
+            for i in range(1, 6)
+        ],
+    }
+    got = EvaluationResult.from_dict(data).hidden_needs
+    assert len(got) == settings.MAX_HIDDEN_NEEDS
+    assert [h.inferred_need for h in got] == ["不安1", "不安2", "不安3"]

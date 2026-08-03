@@ -136,6 +136,30 @@ def _customer_profile(profile) -> None:
         st.info(f"🎯 次回の攻め方：{profile.next_approach}")
 
 
+def _follow_up_card(fu) -> None:
+    """前回の宿題ができていたかの答え合わせ。今回の1ポイントの上に置く。
+
+    「前回言われたことができたか →（できたなら）次はこれ」という順に読ませることで、
+    毎回バラバラの指摘ではなく積み上げとして受け取れるようにする。
+    """
+    if not fu or not fu.previous_headline:
+        return
+    color = theme.INDIGO if fu.achieved else theme.SUNNY
+    stamp = f"（⏱ {fu.timestamp}）" if fu.timestamp else ""
+    st.markdown(
+        f"""
+        <div class="tk-card" style="text-align:left;border-left:5px solid {color}">
+            <div style="color:{color};font-size:.78rem;font-weight:700;
+                 letter-spacing:.08em">前回の宿題</div>
+            <div style="margin:.15rem 0 .3rem;font-weight:600">{fu.previous_headline}</div>
+            <div style="font-size:1.02rem">{fu.icon} {fu.label}{stamp}</div>
+            <p style="margin:.25rem 0 0;color:{theme.MUTED}">{fu.comment}</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def _one_point_card(op) -> None:
     """『次に直す1点』を結果画面の最上部に大きく出す。
 
@@ -253,10 +277,12 @@ def _scene_feedback(f, expanded: bool = False) -> None:
 def evaluation_result(result: EvaluationResult) -> None:
     """評価結果を表示する。
 
-    最上部は『次に直す1点』と、その裏づけになる場面（Before → After）だけ。
+    読む順番は「前回の宿題ができたか → 今回の1点 → その根拠になった場面」。
     点数・会話配分・隠れたニーズ・攻略メモは畳んでおき、見たい人だけが開く。
     見る項目が多いと何を改善すべきか分からなくなるため、既定では絞って見せる。
     """
+    _follow_up_card(result.follow_up)
+
     op = result.one_point
     if op:
         _one_point_card(op)

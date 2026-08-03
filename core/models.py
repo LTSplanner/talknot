@@ -7,6 +7,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
+from config import settings
+
 # 評価文でAIが英語のジョハリ用語（Open/Blind/Hidden/Unknown）を混ぜることがあるため、
 # 解析時に日本語（開放/盲点/秘密/未知 領域）へ統一する。過去に保存した評価も表示時に直る。
 _JA_JOHARI_SUBS = [
@@ -82,14 +84,34 @@ def _is_customer_echo(before: str, customer_line: str, emotion_note: str) -> boo
     return False
 
 
-def _deep_ja_johari(obj):
-    """dict/list を再帰的にたどり、文字列値のジョハリ英語表記を日本語へ置換する。"""
+def _fix_terms(text: str) -> str:
+    """音声認識が業界用語を同音の一般語に誤変換したものを直す。
+
+    弊社は新築マンションのインテリアオプションを扱うため、「入隅」が「入り墨」に
+    なるような誤変換が起きる。プロンプトでも用語集を渡しているが、モデル任せに
+    しないためコード側でも直す（対応表は settings.TRANSCRIPT_FIXES）。
+    """
+    if not text:
+        return text
+    for wrong, right in settings.TRANSCRIPT_FIXES.items():
+        if wrong in text:
+            text = text.replace(wrong, right)
+    return text
+
+
+def _normalize_text(text: str) -> str:
+    """保存・表示前に文字列へかける共通の整形（ジョハリ用語＋業界用語の誤変換）。"""
+    return _fix_terms(_ja_johari(text))
+
+
+def _deep_normalize(obj):
+    """dict/list を再帰的にたどり、文字列値に _normalize_text をかける。"""
     if isinstance(obj, str):
-        return _ja_johari(obj)
+        return _normalize_text(obj)
     if isinstance(obj, dict):
-        return {k: _deep_ja_johari(v) for k, v in obj.items()}
+        return {k: _deep_normalize(v) for k, v in obj.items()}
     if isinstance(obj, list):
-        return [_deep_ja_johari(v) for v in obj]
+        return [_deep_normalize(v) for v in obj]
     return obj
 
 
@@ -183,6 +205,39 @@ class OnePoint:
 
 
 @dataclass
+class FollowUp:
+    """前回出した『1ポイント』が今回できていたかの答え合わせ。
+
+    毎回バラバラの指摘で終わらせず、同じ課題をできるまで追いかけるための記録。
+    前回の評価が無い（初回）ときは None。
+    """
+    previous_headline: str = ""   # 前回の宿題の見出し
+    status: str = ""              # done / partial / not_yet
+    timestamp: str = ""           # そう判断した場面 "MM:SS"
+    comment: str = ""             # 根拠（責めずに事実で・60字以内）
+
+    # 表示用の見た目（UI がそのまま使う）。未知の値は「確認中」に寄せる。
+    _LABELS = {
+        "done": ("✅", "できていました"),
+        "partial": ("🔄", "一部できていました"),
+        "not_yet": ("→", "まだこれからです"),
+    }
+
+    @property
+    def icon(self) -> str:
+        return self._LABELS.get(self.status, ("🔍", ""))[0]
+
+    @property
+    def label(self) -> str:
+        return self._LABELS.get(self.status, ("", "確認中"))[1]
+
+    @property
+    def achieved(self) -> bool:
+        """次の課題へ進めた（＝前回の宿題ができた）か。"""
+        return self.status == "done"
+
+
+@dataclass
 class TimestampedFeedback:
     """『動画の何分何秒のトーク』単位の Before/After フィードバック。"""
     timestamp: str          # "MM:SS"
@@ -203,6 +258,7 @@ class EvaluationResult:
     knowledge: list[KnowledgeItem] = field(default_factory=list)  # 抽出した弊社ナレッジ
     customer_profile: "CustomerProfile | None" = None  # お客様の攻略メモ（次回の活かし方）
     one_point: "OnePoint | None" = None  # 次に直す1点（結果画面の最上部に出す要約）
+    follow_up: "FollowUp | None" = None  # 前回の1点ができていたかの答え合わせ
 
     @property
     def total(self) -> int:
@@ -271,8 +327,9 @@ class EvaluationResult:
     @classmethod
     def from_dict(cls, data: dict) -> "EvaluationResult":
         """Gemini が返す JSON（core/prompts.py のフォーマット）からの復元。"""
-        # 英語のジョハリ用語（Hidden領域 等）を日本語（秘密領域 等）へ統一する
-        data = _deep_ja_johari(data)
+        # 英語のジョハリ用語（Hidden領域 等）を日本語へ統一し、業界用語の誤変換
+        #（「入り墨」→「入隅」等）も直す。過去に保存した評価も表示時に直る。
+        data = _deep_normalize(data)
 
         def _bool(v) -> bool:
             if isinstance(v, bool):
@@ -324,9 +381,21 @@ class EvaluationResult:
                 keep=op.get("keep") or "",
             )
 
+        follow_up = None
+        fu = data.get("follow_up")
+        if isinstance(fu, dict) and (fu.get("previous_headline") or fu.get("status")):
+            follow_up = FollowUp(
+                previous_headline=fu.get("previous_headline") or "",
+                status=(fu.get("status") or "").strip().lower(),
+                timestamp=fu.get("timestamp") or "",
+                comment=fu.get("comment") or "",
+            )
+
         return cls(
             scores=[cls._parse_score(s) for s in data.get("scores", [])],
             johari=johari,
+            # 件数はモデルの出力がブレるので、重要な順（プロンプトで指示済み）に
+            # 上限まで採る。読む量を一定に保つため。
             hidden_needs=[
                 HiddenNeed(
                     timestamp=h.get("timestamp", ""),
@@ -337,7 +406,7 @@ class EvaluationResult:
                 )
                 for h in data.get("hidden_needs", [])
                 if h.get("inferred_need")
-            ],
+            ][:settings.MAX_HIDDEN_NEEDS],
             feedback=[cls._parse_feedback(f) for f in data.get("feedback", [])],
             summary=data.get("summary", ""),
             knowledge=[
@@ -350,6 +419,7 @@ class EvaluationResult:
             ],
             customer_profile=customer_profile,
             one_point=one_point,
+            follow_up=follow_up,
         )
 
     def to_dict(self) -> dict:
@@ -362,4 +432,5 @@ class EvaluationResult:
             "knowledge": [vars(k) for k in self.knowledge],
             "customer_profile": vars(self.customer_profile) if self.customer_profile else None,
             "one_point": vars(self.one_point) if self.one_point else None,
+            "follow_up": vars(self.follow_up) if self.follow_up else None,
         }

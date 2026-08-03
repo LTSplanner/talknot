@@ -1,6 +1,11 @@
 """商談の確定情報（予定タイトルの解析とプロンプト反映）のテスト。"""
 from core import prompts
-from core.meeting_context import build_meeting_context, known_names, parse_meeting_title
+from core.meeting_context import (
+    build_meeting_context,
+    fill_customer_placeholders,
+    known_names,
+    parse_meeting_title,
+)
 
 
 def test_parses_standard_title():
@@ -92,3 +97,62 @@ def test_roleplay_prompt_includes_planner_name():
     p = prompts.build_roleplay_prompt(["まだ何も考えてなくて"], meeting_context=ctx)
     assert "安栗実沙" in p
     assert "1人ロープレ" in p
+
+
+def test_prompt_enforces_length_inline_in_json_schema():
+    """分量の指定は、離れた節だけでなく JSON の各項目定義にも書く（効きやすいため）。"""
+    p = prompts.build_evaluation_prompt()
+    schema = p.split("# 出力フォーマット", 1)[1]
+    assert "150字以内" in schema      # summary
+    assert "60字以内" in schema       # johari.comment / one_point.keep
+    # sales_comment は字数ではなく「3文の形」で縛る（短くすると場面と次の一言が落ちるため）
+    assert "3つの短文" in schema
+    assert "各40字以内" in schema
+
+
+def test_prompt_allows_fixing_homophone_mishearings():
+    """同音の聞き取り違いだけは文脈で直してよい、という指示が入っている。"""
+    p = prompts.build_evaluation_prompt()
+    assert "同音の聞き取り違い" in p
+    assert "聞き取り不明" in p
+
+
+def test_fills_customer_name_placeholders():
+    """『〇〇様』のまま出たセリフを実名に直す（そのまま読み上げられるように）。"""
+    data = {
+        "one_point": {"action": "「〇〇様はどんな雰囲気がお好みですか？」"},
+        "feedback": [{"after": "○○様、そちらは（お客様名）様のご希望どおりです"}],
+    }
+    got = fill_customer_placeholders(data, "矢野淳也様")
+    assert got["one_point"]["action"] == "「矢野様はどんな雰囲気がお好みですか？」"
+    assert got["feedback"][0]["after"] == "矢野様、そちらは矢野様のご希望どおりです"
+
+
+def test_placeholder_fill_uses_short_name_as_is():
+    """姓が判断できない短い名前は、そのまま使う。"""
+    assert fill_customer_placeholders("〇〇様、こんにちは", "林様") == "林様、こんにちは"
+
+
+def test_placeholder_fill_is_noop_without_customer():
+    """お客様名が無いとき（1人ロープレ等）は何もしない。"""
+    text = "〇〇様はいかがですか"
+    assert fill_customer_placeholders(text, "") == text
+
+
+def test_placeholder_fill_keeps_real_names():
+    """実名で書けているセリフは触らない。"""
+    text = "矢野様、いかがですか"
+    assert fill_customer_placeholders(text, "矢野淳也様") == text
+
+
+def test_prompt_forbids_placeholder_names():
+    ctx = build_meeting_context("初回商談 L260722484601　矢野淳也様｜物件", "森谷淳美")
+    p = prompts.build_evaluation_prompt(meeting_context=ctx)
+    assert "プレースホルダは絶対に書かない" in p
+
+
+def test_prompt_naming_rule_absent_without_customer():
+    """お客様名が無い経路（1人ロープレ）では、その指示を出さない。"""
+    p = prompts.build_evaluation_prompt(
+        meeting_context=build_meeting_context("", "安栗実沙"))
+    assert "プレースホルダ" not in p

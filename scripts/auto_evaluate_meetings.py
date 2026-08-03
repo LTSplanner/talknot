@@ -32,6 +32,7 @@ import time
 from config import settings
 from core.auto_eval import case_ids_in, is_first_meeting, select_targets
 from core.meeting_context import build_meeting_context
+from core.progress import latest_one_point
 from services import gemini_analyzer, google_calendar, google_drive, storage
 
 # DWD で対象者を impersonate するときのスコープ（読み取りのみ）。
@@ -141,7 +142,13 @@ def _process_one(
     os.close(fd)
     try:
         google_drive.download_to_path(creds, rec["id"], tmp)
-        result = gemini_analyzer.analyze(tmp, reference_talk, knowledge, context)
+        # 前回この人に出した「1点」を渡し、できたかの答え合わせから始めさせる。
+        try:
+            previous = latest_one_point(storage.list_evaluations(planner))
+        except Exception:  # noqa: BLE001 履歴が読めなくても評価は続ける
+            previous = None
+        result = gemini_analyzer.analyze(
+            tmp, reference_talk, knowledge, context, previous)
         storage.save_evaluation(planner, result, label=summary)
         return "評価を保存"
     except Exception as e:  # noqa: BLE001 1件の失敗で全体を止めない

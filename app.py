@@ -35,6 +35,7 @@ except Exception:
 from auth import google_oauth, persist, session  # noqa: E402
 from config import settings  # noqa: E402
 from core import meeting_context  # noqa: E402
+from core.progress import latest_one_point  # noqa: E402
 from core.models import EvaluationResult  # noqa: E402
 from services import drive_sa, gemini_analyzer, google_drive, storage, usage_log  # noqa: E402
 from ui import components, theme  # noqa: E402
@@ -178,6 +179,14 @@ def _friendly_gemini_error(exc: Exception) -> str:
 _ANALYSIS_SLOTS = threading.BoundedSemaphore(settings.MAX_CONCURRENT_ANALYSES)
 
 
+def _previous_one_point(user_email: str) -> dict | None:
+    """前回この人に出した『次に直す1点』を履歴から取り出す（無ければ None）。"""
+    try:
+        return latest_one_point(storage.list_evaluations(user_email))
+    except Exception:  # noqa: BLE001 履歴が読めなくても評価は続ける
+        return None
+
+
 def _analyze_worker(
     job_id: str,
     user_email: str,
@@ -207,6 +216,7 @@ def _analyze_worker(
                 storage.get_reference_talk(),
                 storage.get_knowledge_base(),
                 meeting_context,
+                _previous_one_point(user_email),
             )
         storage.finish_evaluation(user_email, job_id, result, label)
         # 商談から抽出した弊社ナレッジを蓄積（使うほど評価が弊社仕様に賢くなる）
@@ -944,6 +954,8 @@ def _roleplay_worker(
                 persona=storage.get_customer_persona(),
                 # お客様は台本の架空ペルソナなので、確定情報は練習者の氏名だけ渡す。
                 meeting_context=meeting_context.build_meeting_context("", planner_name),
+                # 商談とロープレは1本の線でつなぐ（ロープレで練習した1点を次の商談で見る）。
+                previous_one_point=_previous_one_point(user_email),
             )
         storage.finish_evaluation(user_email, job_id, result, label)
         storage.append_knowledge(result.knowledge)

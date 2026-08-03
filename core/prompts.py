@@ -41,6 +41,15 @@ def _meeting_context_block(context: dict | None) -> str:
         return ""
 
     names = "／".join(f"「{n}」" for n in _mc.known_names(context))
+    # セリフ内でお客様を呼ぶときに「〇〇様」と空欄で書かせない（読み上げられないため）。
+    naming = (
+        f"\n★after や one_point.action の**セリフの中でお客様を呼ぶときは、"
+        f"「{customer}」から姓を取って「◯◯様」と実名で書く**。"
+        f"「〇〇様」「△△様」「（お客様名）様」のような"
+        f"**空欄・プレースホルダは絶対に書かない**（そのままでは読み上げられないため）。"
+        f"呼びかけが不要なら、名前を入れずに書く。"
+        if customer else ""
+    )
     who = (
         f"\n★どちらが営業担当かは上の情報で確定しています。自己紹介・提案・見積り案内を"
         f"している側が {planner} です。"
@@ -52,7 +61,55 @@ def _meeting_context_block(context: dict | None) -> str:
 ★これは録画の音声よりも優先する確定情報です。{names} は必ずこの表記で書いてください。
   音から起こしたカタカナの当て字（例「アングルリ」のような誤記）は禁止です。
 ★ここに無い人名（ご家族・他社の担当者など）は、音で当て字を作らず「ご主人様」「奥様」
-  「お母様」「ご担当者様」などの役割呼称で書いてください。{who}
+  「お母様」「ご担当者様」などの役割呼称で書いてください。{naming}{who}
+"""
+
+
+def _glossary_block() -> str:
+    """弊社の業界用語集。音声認識の同音誤変換をこの表記へ寄せさせる。"""
+    lines = "\n".join(
+        f"- {group}：{'／'.join(terms)}"
+        for group, terms in settings.INDUSTRY_GLOSSARY.items()
+    )
+    fixes = "／".join(
+        f"「{wrong}」→「{right}」" for wrong, right in settings.TRANSCRIPT_FIXES.items()
+    )
+    return f"""
+# 弊社の業界用語集（新築マンションのインテリアオプション）
+音が近い語はこの表記に寄せて書き起こしてください。一般語に誤変換しないこと。
+{lines}
+よくある誤変換：{fixes}
+"""
+
+
+def _previous_block(previous: dict | None) -> str:
+    """前回出した『1ポイント』を渡し、今回できたかの答え合わせをさせる。
+
+    毎回バラバラの指摘で終わらせず、同じ課題を「できるまで」追いかけるための節。
+    """
+    if not isinstance(previous, dict):
+        return ""
+    headline = (previous.get("headline") or "").strip()
+    if not headline:
+        return ""
+
+    action = (previous.get("action") or "").strip()
+    when = "／".join(
+        x for x in ((previous.get("saved_at") or "").strip(),
+                    (previous.get("label") or "").strip()[:40]) if x
+    )
+    action_row = f"\n- 渡したセリフ：{action}" if action else ""
+    when_row = f"\n- 前回の商談：{when}" if when else ""
+
+    return f"""
+# 前回の宿題（この営業担当に、前回の評価で出した「次に直す1点」）
+- 直す1点：{headline}{action_row}{when_row}
+★今回の録画で**この1点が実行できているか**を必ず確かめ、follow_up に書いてください。
+  できていない場合も責めず、事実として書きます（根拠のタイムスタンプを必ず添える）。
+★そのうえで今回の one_point を決めます：
+  - 前回の1点が**まだできていなければ、同じ課題を継続**します。headline は同じ趣旨のまま、
+    action を「より小さく・より実行しやすい形」に言い換えてください（難易度を上げない）。
+  - **できていれば次の段階へ進めます**。同じ課題を繰り返さず、次に受注へ効く1点を出します。
 """
 
 
@@ -84,6 +141,7 @@ def build_roleplay_prompt(
     focus: str | None = None,
     persona: dict | None = None,
     meeting_context: dict | None = None,
+    previous_one_point: dict | None = None,
 ) -> str:
     """1人ロープレ（台本のお客様 × 音声で応答）の評価プロンプト。
 
@@ -93,7 +151,7 @@ def build_roleplay_prompt(
     """
     base = build_evaluation_prompt(
         reference_talk=talk_script, knowledge_base=knowledge_base,
-        meeting_context=meeting_context,
+        meeting_context=meeting_context, previous_one_point=previous_one_point,
     )
     lines = "\n".join(f"{i+1}. お客様「{t}」" for i, t in enumerate(scenario_lines))
     focus_block = _focus_block(focus) + _persona_block(persona)
@@ -126,6 +184,7 @@ def build_evaluation_prompt(
     reference_talk: str | None = None,
     knowledge_base: str | None = None,
     meeting_context: dict | None = None,
+    previous_one_point: dict | None = None,
 ) -> str:
     criteria_lines = "\n".join(
         f"- {c.key} ({c.number} {c.title}): {c.description}"
@@ -141,11 +200,12 @@ def build_evaluation_prompt(
         else ""
     )
     context_block = _meeting_context_block(meeting_context)
+    previous_block = _previous_block(previous_one_point)
     return f"""{settings.SALES_AI_PERSONA}
 
 ★出力する文章はすべて日本語で書いてください（scores のコメント、hidden_needs の
 signal・inferred_need・note、feedback、summary を含め、英語を混ぜない）。
-{context_block}
+{context_block}{previous_block}{_glossary_block()}
 
 動画（または音声）から、文字面だけでなく「声のトーン」「間」「発話比率」、さらに
 言い淀み・沈黙・話題の回避・過剰な同意・即答できない様子・声の小ささなどの
@@ -224,9 +284,13 @@ signal・inferred_need・note、feedback、summary を含め、英語を混ぜ�
 
 # 発言の書き起こし精度（customer_line / before / after の文言）
 - customer_line と before は **実際に話された言葉のまま** 書く。要約・言い換え・敬語の
-  整形をしない（after だけが改善案の作文）。
-- 聞き取れない箇所は無理に埋めず「…（聞き取り不明）」と書く。音が似ているだけの語を
-  当てはめない。1文まるごと不確かなら、その feedback 項目自体を出さない。
+  整形をしない（after だけが改善案の作文）。言い淀み（「えっと」「あ、」）も残す。
+- **同音の聞き取り違いだけは直す**：弊社は新築マンションのインテリアオプションを扱うため、
+  音声認識が業界用語を同音の一般語に誤変換する（例「入隅」→「入り墨」、「角」→「門」、
+  「巾木」→「幅木」）。下の用語集に音が近い語は、**用語集の表記へ寄せる**こと。
+  直してよいのは**語の取り違えだけ**で、言い回し・語順・言い淀みは変えない。
+- 文脈からも判断できない語は、無理に当てず「◯◯（聞き取り不明）」と書く。
+  1文まるごと不確かなら、その feedback 項目自体を出さない。
 - 弊社・商材の正式表記に必ず合わせる：ライフタイムサポート／フロアコーティング／
   エコカラット／ダウンライト／内覧会／お引渡し／オプション。音が近い別語（例「エコガラス」）
   に置き換えない。
@@ -246,12 +310,18 @@ signal・inferred_need・note、feedback、summary を含め、英語を混ぜ�
 
 # 出力フォーマット（JSON のみ。前後に説明文を付けない）
 {{
-  "one_point": {{
-    "headline": "<この商談で次に直す1点。行動で20字程度。例『商品説明の前に暮らしを2問聞く』>",
+  "follow_up": {{
+    "previous_headline": "<前回の宿題の見出しをそのまま。前回の宿題が無ければこの項目ごと省く>",
+    "status": "<done=できていた / partial=一部できていた / not_yet=まだできていない>",
     "timestamp": "MM:SS",
-    "reason": "<なぜそこか＋その結果お客様がどうなったか。1〜2文>",
-    "action": "<次回そのまま言える具体的なセリフ。「〜」の形で1〜2文>",
-    "keep": "<続けてほしい良かった点を1つだけ・具体的に>"
+    "comment": "<そう判断した根拠を60字以内。責めずに事実で>"
+  }},
+  "one_point": {{
+    "headline": "<この商談で次に直す1点。行動で**20字程度**。例『商品説明の前に暮らしを2問聞く』>",
+    "timestamp": "MM:SS",
+    "reason": "<なぜそこか＋その結果お客様がどうなったか。**100字以内**（厳守）>",
+    "action": "<次回そのまま言える具体的なセリフ。「〜」の形で**80字以内**（厳守）>",
+    "keep": "<続けてほしい良かった点を1つだけ・具体的に。**60字以内**（厳守）>"
   }},
   "hidden_needs": [{{
     "timestamp": "MM:SS",
@@ -263,7 +333,7 @@ signal・inferred_need・note、feedback、summary を含め、英語を混ぜ�
   "scores": [{{
     "key": "<上記key>",
     "sales_score": <1-5>,
-    "sales_comment": "<総合講評（上の5観点を踏まえ、良かった点＋次の一歩）>",
+    "sales_comment": "<**3つの短文**で書く（各40字以内・合計120字前後）。①『MM:SS で〜』と根拠の場面 ②別の『MM:SS で〜』の場面 ③その結果お客様がどうなったか。ここは**点数の根拠**を書く場所で、改善の指示は one_point に1つだけ書く。文字数より**この3文の形**を必ず守る>",
     "reference_score": <sales_score と同じ値をそのまま入れる（データ互換のため。UIでは表示しない）>,
     "reference_comment": ""
   }}],
@@ -272,7 +342,7 @@ signal・inferred_need・note、feedback、summary を含め、英語を混ぜ�
     "blind_pct": <盲点領域 0-100>,
     "hidden_pct": <秘密領域 0-100>,
     "unknown_pct": <未知領域 0-100>,
-    "comment": "<配分の講評。盲点・秘密にもっと時間を割くための具体アドバイス>"
+    "comment": "<配分の講評。**60字以内**（厳守）。今の偏りと、次に増やすべき領域だけ>"
   }},
   "feedback": [{{
     "timestamp": "MM:SS",
@@ -282,7 +352,7 @@ signal・inferred_need・note、feedback、summary を含め、英語を混ぜ�
     "before": "<その直後に【営業担当（提案・ヒアリング・見積り案内をする側）】が実際に返した発言だけを、話した言葉のまま。customer_line と同じ内容を書いてはいけない。話者名の接頭辞（『◯◯:』等）は付けない>",
     "after": "<同じ営業担当がこう言えたら、という改善後の発言（営業の言葉のみ・話者名の接頭辞は付けない）>"
   }}],
-  "summary": "<総合スコアを踏まえた全体のポジティブな振り返り（言葉は前向きに）>",
+  "summary": "<全体の振り返り。**150字以内**（厳守。超えたら削る）。良かった点1つ＋次の重点1つだけ。言葉は前向きに>",
   "customer_profile": {{
     "attributes": ["<トーク全体から読み取れるお客様の特徴タグを1〜4個。例: せっかち/慎重/価格重視/デザイン重視/理論派/共感重視/即決/家族相談型>"],
     "summary": "<このお客様の人物像（意思決定の傾向・話し方や情報の受け取り方の好み）を2〜3文・日本語で>",
@@ -314,8 +384,10 @@ hidden_needs は **0〜3件**。確かな非言語サインの根拠があるも
   網羅は不要で、同種の指摘を繰り返さない。会話が成立していない商談では無理に出さない。
   各件は customer_line → before → after のセットで、after は**そのまま言えるセリフ**にする。
   emotion_note は「声のトーン・間・相槌の変化」など観測した事実を短く（40字以内）。
-- sales_comment は **60〜100字**。①MM:SS の場面 ②できていたこと／足りなかったこと
-  ③次の一言、を短く詰める。抽象語（「傾聴できていた」「深掘りを」）だけで終えない。
+- sales_comment は **点数の根拠**を書く場所（改善の指示は one_point に1つだけ）。
+  **3つの短文**で書く（各40字以内）。①「MM:SS で〜」と根拠の場面、②別の場面、
+  ③その結果お客様がどうなったか。抽象語（「傾聴できていた」「深掘りを」）だけで
+  終えず、必ず MM:SS を伴わせる。**字数より3文の形を守る**（短くするために場面を省かない）。
 - summary は **150字以内**。良かった点1つ＋次の重点1つに絞る。
 - johari.comment は **60字以内**。配分の事実と、次に増やすべき領域だけ書く。
 - 講評（コメント）の“言葉”は前向き・建設的に、しかし“点数”は甘くしないこと。
@@ -325,4 +397,14 @@ knowledge には、この商談から抽出できる『弊社の財産になる�
 - 必ず一般化して書く（次の商談でも使える形に）。特筆すべき学びが無ければ空配列 [] でよい。
 - 個人情報は絶対に含めない（顧客名・住所・電話番号・金額などの個別具体情報は書かない）。
 
-customer_profile は録画全体の話し方・スピード・語彙・お客様の反応から推定する。決めつけず“傾向”として書く。英語を混ぜない（属性タグも日本語）。"""
+customer_profile は録画全体の話し方・スピード・語彙・お客様の反応から推定する。決めつけず“傾向”として書く。英語を混ぜない（属性タグも日本語）。
+
+# 【提出前の自己点検】必ず行う
+JSON を書き終えたら、出力する前に次を1つずつ数えて確認し、超えていたら**削ってから**出す：
+- summary：150字以内
+- scores[].sales_comment：**3文になっているか**（場面・場面・結果）／各文40字以内／MM:SS が入っているか
+- one_point.reason：100字以内 ／ one_point.action：80字以内 ／ one_point.keep：60字以内
+- johari.comment：60字以内
+- hidden_needs：3件以内 ／ feedback：5件以内
+削るときは**抽象的な説明から先に落とす**。具体的なセリフ・タイムスタンプ・数字は残す。
+（分量を守ることは、内容を厚くすることより優先される。読み手が次の商談で1つ直せることが目的。）"""
