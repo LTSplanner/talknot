@@ -11,7 +11,11 @@ name: auto-evaluate-meetings
 
 on:
   schedule:
-    - cron: "0 12 * * 1-5"   # 12:00 UTC = 21:00 JST の平日(月〜金)
+    # 10:20 UTC = 19:20 JST（平日）。狙いは「21時前後に走ること」。
+    # GitHub の定期実行はこのリポジトリで常に 1.5〜3.2 時間遅れて起動するため
+    # （daily-minutes の実績：86〜194分の遅延）、その分だけ前倒しで指定している。
+    # 毎時0分は混雑して遅延が伸びるので、あえて 20 分にずらしている。
+    - cron: "20 10 * * 1-5"
   workflow_dispatch:          # 手動実行も可
 
 concurrency:
