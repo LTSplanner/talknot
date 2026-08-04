@@ -17,6 +17,8 @@ storage 実行 env: KNOWLEDGE_SHEET_ID, KNOWLEDGE_SA_JSON か KNOWLEDGE_SA_FILE�
 from __future__ import annotations
 
 import argparse
+import datetime as _dt
+import hashlib
 import json
 import os
 import sys
@@ -103,13 +105,87 @@ def _name_of(email: str, display_names: dict[str, str] | None = None) -> str:
     return name or (email or "").split("@", 1)[0]
 
 
-def _message_for(email: str, display_names: dict[str, str] | None = None) -> str:
-    """前向き＆短いリマインド本文（＋アプリURL）。"""
-    return (
-        f"🎙️ {_name_of(email, display_names)}さん、今日のロープレはまだ1本残っています。\n"
-        "5分でOK、続けた分だけ商談が変わります。今からサッと1本いきましょう！\n"
-        f"{_APP_URL}"
-    )
+# リマインド本文の型。毎日続けてもらうのが目的なので、どれも次の順で組み立てる：
+#   1. まず圧を外す（うまくやらなくていい）— 質を求められると手が止まるため
+#   2. 所要時間を見せる（5分）— 先延ばしの言い訳を減らす
+#   3. 毎日やる理由を、命令ではなく事実として置く
+#   4. 迷わせずに行動へ
+# 同じ文面が続くと読み飛ばされるので、人ごと・日ごとに切り替える（_variant_index）。
+_MESSAGES = [
+    "🎙️ {name}さん、今日の1本がまだ残っています。\n\n"
+    "うまくやらなくて大丈夫です。5分で終わります。\n"
+    "まとめてやるより、毎日ちいさく積むほうが確実に効きます。\n\n"
+    "今日のぶん、いきましょう。",
+
+    "🎙️ {name}さん、今日のロープレはこれからですね。\n\n"
+    "気合いは要りません。5分だけ、いつもの1本を。\n"
+    "毎日の1本が、来週の商談をかるくします。",
+
+    "🎙️ {name}さん、まだ今日の1本が空いています。\n\n"
+    "完璧じゃなくていいので、口を動かすところまで。\n"
+    "続けている人ほど、本番でことばが出てきます。",
+
+    "🎙️ {name}さん、今日はもうロープレしましたか？\n\n"
+    "5分で終わります。うまくいかなくても、それが練習です。\n"
+    "1日空けると戻すのに時間がかかります。今日のうちに。",
+
+    "🎙️ {name}さん、今日の練習がまだですね。\n\n"
+    "思い出すだけでも意味があります。まずは1本。\n"
+    "毎日ふれているかどうかで、半年後が変わります。",
+
+    "🎙️ {name}さん、5分あれば今日の1本が終わります。\n\n"
+    "出来ばえは気にしなくて大丈夫。\n"
+    "毎日つづけた人から、商談が変わっていきます。",
+
+    "🎙️ {name}さん、今日のロープレ、まだ空いています。\n\n"
+    "気が乗らない日ほど、短くていいので触れておくのがコツです。\n"
+    "1本だけ、いきましょう。",
+
+    "🎙️ {name}さん、今日のぶんがまだです。\n\n"
+    "うまく話せなくて大丈夫。練習はそのためにあります。\n"
+    "毎日の積み重ねが、いちばん早い近道です。",
+
+    "🎙️ {name}さん、まだ今日の1本が残っています。\n\n"
+    "完成度より、毎日ふれること。5分で足ります。\n"
+    "今日も1本、いきましょう。",
+
+    "🎙️ {name}さん、今日のロープレはこれからですか？\n\n"
+    "ことばに詰まっても大丈夫です。詰まったところが伸びしろです。\n"
+    "毎日1本、続けていきましょう。",
+
+    "🎙️ {name}さん、今日の1本、まだですね。\n\n"
+    "今日はうまくいかなくてもいい日です。声に出すところまでで十分。\n"
+    "毎日やっている人ほど、本番で慌てません。",
+
+    "🎙️ {name}さん、あと5分だけ時間をつくれますか。\n\n"
+    "今日の1本を置いておくと、明日はもっと重くなります。\n"
+    "軽いうちに、今日のうちに。",
+]
+
+
+def _variant_index(email: str, today: str) -> int:
+    """その人・その日に使う文面の番号。
+
+    「日付の通し番号 ＋ 人ごとのずらし幅」を文面数で割った余り。こうすると：
+      - 同じ人が2日つづけて同じ文面を受け取らない（毎日1つずつ進む）
+      - 同じ日でも人によって文面が違う（ずらし幅が人ごとに違う）
+      - 何度実行しても同じ結果（再送しても文面が変わらない）
+    """
+    try:
+        day_no = _dt.date.fromisoformat(today).toordinal()
+    except ValueError:
+        day_no = 0
+    # Python の hash() は実行ごとに変わるため、安定するハッシュを使う。
+    offset = int(hashlib.md5(email.encode("utf-8")).hexdigest(), 16)
+    return (day_no + offset) % len(_MESSAGES)
+
+
+def _message_for(
+    email: str, display_names: dict[str, str] | None = None, today: str = ""
+) -> str:
+    """その人・その日のリマインド本文（＋アプリURL）。"""
+    body = _MESSAGES[_variant_index(email, today)]
+    return f"{body.format(name=_name_of(email, display_names))}\n{_APP_URL}"
 
 
 def main() -> int:
@@ -157,7 +233,7 @@ def main() -> int:
 
     # 「s.kageyamaさん」ではなく「景山冴香さん」と呼びかける（表示名が取れた人だけ）。
     names = _display_names(missed, sa_info)
-    email_to_text = {email: _message_for(email, names) for email in missed}
+    email_to_text = {email: _message_for(email, names, today) for email in missed}
 
     if args.dry_run:
         print("[dry-run] 送信は行いません。本文プレビュー:")
