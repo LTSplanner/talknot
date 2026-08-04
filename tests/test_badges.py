@@ -24,11 +24,14 @@ def _rec(saved_at, total=15, roleplay=True, status="done", **extra):
     }
 
 
-def test_badge_set_is_50_plus_50():
-    assert len(ROLEPLAY_BADGES) == 50
-    assert len(MEETING_BADGES) == 50
-    assert len(ALL_BADGES) == 100
-    assert len({b.id for b in ALL_BADGES}) == 100   # ID の重複なし
+def test_badge_set_is_consistent():
+    """称号は随時足していくので総数は固定しない。壊れない条件だけを守る。"""
+    assert len(ALL_BADGES) == len(ROLEPLAY_BADGES) + len(MEETING_BADGES)
+    assert len({b.id for b in ALL_BADGES}) == len(ALL_BADGES)   # ID の重複なし
+    # 同じカテゴリの中で名前・アイコンが被ると、集める楽しみが削がれる
+    for badges_in_cat in (ROLEPLAY_BADGES, MEETING_BADGES):
+        assert len({b.name for b in badges_in_cat}) == len(badges_in_cat)
+        assert len({b.icon for b in badges_in_cat}) == len(badges_in_cat)
 
 
 def test_roleplay_and_meeting_are_counted_separately():
@@ -125,7 +128,7 @@ def test_perfect_criterion_needs_repeats():
 def test_no_history_earns_nothing():
     statuses = badges.evaluate([])
     assert badges.earned_count(statuses) == 0
-    assert len(statuses) == 100
+    assert len(statuses) == len(ALL_BADGES)
     assert badges.next_up(statuses) == []      # 0件のときは励ましを出さない
 
 
