@@ -42,8 +42,21 @@ def test_same_person_same_day_is_stable():
 
 def test_all_variants_are_used_over_time():
     """一定期間まわせば全種類が使われる（死に文面をつくらない）。"""
-    seen = {_variant_index(ALICE, f"2026-08-{d:02d}") for d in range(1, 32)}
+    import datetime as dt
+    start = dt.date(2026, 8, 1)
+    seen = {_variant_index(ALICE, str(start + dt.timedelta(days=i)))
+            for i in range(len(_MESSAGES) + 2)}
     assert seen == set(range(len(_MESSAGES)))
+
+
+def test_variants_are_all_different():
+    """同じ文面を二重に登録しない（増やすときの取り違え防止）。"""
+    assert len(set(_MESSAGES)) == len(_MESSAGES)
+
+
+def test_rotation_covers_about_a_month():
+    """1ヶ月ぶん回せるだけの種類を持たせる（慣れて読み飛ばされないように）。"""
+    assert len(_MESSAGES) >= 30
 
 
 def test_message_has_name_and_link():
@@ -65,7 +78,8 @@ def test_every_variant_keeps_the_daily_nudge():
     """
     # 負担を下げる言い回し（実際に使っている表現をそのまま並べている）
     soft = ("大丈夫", "気合いは要りません", "完璧じゃなくていい", "うまくいかなくても",
-            "だけでも意味があります", "短くていい", "5分で足ります", "十分", "だけ時間")
+            "だけでも意味があります", "短くていい", "5分で足ります", "十分", "だけ時間",
+            "上手さは要りません", "気にしなくて", "だけでも")
     # 継続を促す言い回し
     daily = ("毎日", "今日", "1日")
     for body in _MESSAGES:
