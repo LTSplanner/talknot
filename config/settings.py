@@ -302,11 +302,19 @@ EVALUATION_CRITERIA: list[Criterion] = [
 
 CRITERIA_BY_KEY = {c.key: c for c in EVALUATION_CRITERIA}
 
-# 1回の評価で出す件数の上限。プロンプトでも同じ数を指示しているが、モデルは
-# 実行ごとに件数がブレるため、表示側でも必ずこの数に収める。
-# hidden_needs はプロンプトで「受注への影響が大きい順」に出させているので、
-# 先頭から採ると重要なものが残る。
-MAX_HIDDEN_NEEDS = _int_env("MAX_HIDDEN_NEEDS", 3)
+# 1回の評価で出す隠れたニーズの上限。**0 以下なら制限しない（既定）**。
+# 件数を絞ると、モデルが商談の前半だけを見て打ち切ってしまい、全体の
+# フィードバックにならなかった。商談は最後まで読み取らせ、根拠のある指摘は
+# すべて出す方針。異常に多いときだけ、この値を設定して抑える。
+# _int_env は最低1を強制するので、ここでは 0（＝制限なし）を表せる素の読み方を使う。
+def _limit_env(key: str, default: int) -> int:
+    try:
+        return int(os.getenv(key, str(default)))
+    except (TypeError, ValueError):
+        return default
+
+
+MAX_HIDDEN_NEEDS = _limit_env("MAX_HIDDEN_NEEDS", 0)
 
 
 # --- 評価の2軸（各項目をこの2視点で採点する）---

@@ -6,6 +6,7 @@
 from config import settings
 from core import badges
 from core.badge_defs import ALL_BADGES, MEETING_BADGES, ROLEPLAY_BADGES
+from core.models import EvaluationResult
 
 
 def _rec(saved_at, total=15, roleplay=True, status="done", **extra):

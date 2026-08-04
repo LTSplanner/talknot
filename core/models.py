@@ -104,6 +104,52 @@ def _normalize_text(text: str) -> str:
     return _fix_terms(_ja_johari(text))
 
 
+# タイムスタンプの表記ゆれ（"MM:SS" / "HH:MM:SS" / ロープレの "T3"）を秒に直す。
+_TURN_RE = re.compile(r"^\s*[TＴ](\d+)\s*$")
+
+
+def _ts_seconds(ts: str) -> int | None:
+    """タイムスタンプを並べ替え用の数値にする。読めなければ None。
+
+    商談は "MM:SS" と "HH:MM:SS" が混ざって返ってくる（1時間を超える録画では
+    後者）。ロープレは "T1" のようなターン番号。どれも同じ尺度に寄せる。
+    """
+    text = (ts or "").strip()
+    m = _TURN_RE.match(text)
+    if m:
+        return int(m.group(1))
+    parts = text.split(":")
+    if not (2 <= len(parts) <= 3):
+        return None
+    try:
+        nums = [int(p) for p in parts]
+    except ValueError:
+        return None
+    seconds = 0
+    for n in nums:
+        seconds = seconds * 60 + n
+    return seconds
+
+
+def _in_time_order(items: list, key=lambda x: x.timestamp) -> list:
+    """タイムスタンプの昇順に並べ替える（読めないものは元の順のまま後ろへ）。
+
+    モデルは時系列を前後させて返すことがある（実際に 02:44:07 の次に 01:50:50 が
+    出た）。商談の流れを追って読むものなので、順番はコード側で保証する。
+    """
+    def sort_key(pair):
+        i, item = pair
+        sec = _ts_seconds(key(item))
+        return (0, sec, i) if sec is not None else (1, 0, i)
+
+    return [item for _, item in sorted(enumerate(items), key=sort_key)]
+
+
+def _limit(items: list, maximum: int) -> list:
+    """件数の上限を適用する。maximum が 0 以下なら制限しない。"""
+    return items[:maximum] if maximum and maximum > 0 else items
+
+
 def _deep_normalize(obj):
     """dict/list を再帰的にたどり、文字列値に _normalize_text をかける。"""
     if isinstance(obj, str):
@@ -394,9 +440,9 @@ class EvaluationResult:
         return cls(
             scores=[cls._parse_score(s) for s in data.get("scores", [])],
             johari=johari,
-            # 件数はモデルの出力がブレるので、重要な順（プロンプトで指示済み）に
-            # 上限まで採る。読む量を一定に保つため。
-            hidden_needs=[
+            # 既定では制限しない（settings.MAX_HIDDEN_NEEDS <= 0）。
+            # 上限を設けると商談の前半だけで打ち切られ、全体を読まなくなるため。
+            hidden_needs=_limit(_in_time_order([
                 HiddenNeed(
                     timestamp=h.get("timestamp", ""),
                     signal=h.get("signal", ""),
@@ -406,8 +452,10 @@ class EvaluationResult:
                 )
                 for h in data.get("hidden_needs", [])
                 if h.get("inferred_need")
-            ][:settings.MAX_HIDDEN_NEEDS],
-            feedback=[cls._parse_feedback(f) for f in data.get("feedback", [])],
+            ]), settings.MAX_HIDDEN_NEEDS),
+            # 商談の流れを追って読めるよう、必ず時系列に並べ替える。
+            feedback=_in_time_order(
+                [cls._parse_feedback(f) for f in data.get("feedback", [])]),
             summary=data.get("summary", ""),
             knowledge=[
                 KnowledgeItem(

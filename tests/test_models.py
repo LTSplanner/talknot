@@ -291,16 +291,67 @@ def test_term_fix_applies_to_summary_and_one_point():
     assert "入隅" in r.one_point.action
 
 
-def test_hidden_needs_capped_to_limit():
-    """モデルが上限を超えて出しても、重要な順に上限まで採る（読む量を一定に保つ）。"""
-    data = {
-        "scores": [],
-        "hidden_needs": [
-            {"timestamp": f"0{i}:00", "signal": "間", "inferred_need": f"不安{i}",
-             "surfaced": False, "note": ""}
-            for i in range(1, 6)
-        ],
-    }
-    got = EvaluationResult.from_dict(data).hidden_needs
-    assert len(got) == settings.MAX_HIDDEN_NEEDS
+def _needs(n):
+    return {"scores": [],
+            "hidden_needs": [
+                {"timestamp": f"0{i}:00", "signal": "間", "inferred_need": f"不安{i}",
+                 "surfaced": False, "note": ""}
+                for i in range(1, n + 1)]}
+
+
+def test_hidden_needs_are_not_capped_by_default():
+    """既定では絞らない。上限を設けると商談の前半だけで打ち切られるため。"""
+    assert settings.MAX_HIDDEN_NEEDS == 0
+    assert len(EvaluationResult.from_dict(_needs(8)).hidden_needs) == 8
+
+
+def test_hidden_needs_capped_when_a_limit_is_set(monkeypatch):
+    """異常に多いときのために、上限を設定すれば効く（重要な順に採る）。"""
+    monkeypatch.setattr(settings, "MAX_HIDDEN_NEEDS", 3)
+    got = EvaluationResult.from_dict(_needs(5)).hidden_needs
     assert [h.inferred_need for h in got] == ["不安1", "不安2", "不安3"]
+
+
+def test_feedback_is_sorted_into_time_order():
+    """モデルが時系列を前後させても、必ず昇順で読めるようにする。
+
+    実際に 02:44:07 の次に 01:50:50 が返ってきた。商談の流れを追うものなので
+    順番はコード側で保証する。
+    """
+    data = {"scores": [], "feedback": [
+        {"timestamp": "01:15:32", "after": "a"},
+        {"timestamp": "02:44:07", "after": "b"},
+        {"timestamp": "01:50:50", "after": "c"},
+        {"timestamp": "06:23", "after": "d"},
+    ]}
+    got = [f.timestamp for f in EvaluationResult.from_dict(data).feedback]
+    assert got == ["06:23", "01:15:32", "01:50:50", "02:44:07"]
+
+
+def test_roleplay_turn_numbers_sort_numerically():
+    """ロープレの "T2" は文字列順（T10 < T2）にならないよう数値で並べる。"""
+    data = {"scores": [], "feedback": [
+        {"timestamp": "T10", "after": "a"},
+        {"timestamp": "T2", "after": "b"},
+    ]}
+    got = [f.timestamp for f in EvaluationResult.from_dict(data).feedback]
+    assert got == ["T2", "T10"]
+
+
+def test_unreadable_timestamps_keep_their_order_at_the_end():
+    data = {"scores": [], "feedback": [
+        {"timestamp": "", "after": "x"},
+        {"timestamp": "05:00", "after": "y"},
+        {"timestamp": "なし", "after": "z"},
+    ]}
+    got = [f.after for f in EvaluationResult.from_dict(data).feedback]
+    assert got == ["y", "x", "z"]
+
+
+def test_hidden_needs_are_also_time_ordered():
+    data = {"scores": [], "hidden_needs": [
+        {"timestamp": "20:00", "inferred_need": "b"},
+        {"timestamp": "05:00", "inferred_need": "a"},
+    ]}
+    got = [h.inferred_need for h in EvaluationResult.from_dict(data).hidden_needs]
+    assert got == ["a", "b"]

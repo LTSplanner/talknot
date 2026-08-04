@@ -84,11 +84,11 @@ def test_prompt_without_context_is_unchanged_shape():
     assert "出力フォーマット" in p
 
 
-def test_prompt_asks_for_one_point_and_short_output():
-    """1ポイントアドバイスと、絞った件数の指示が入っている。"""
+def test_prompt_asks_for_one_point():
+    """改善の指示は one_point の1つに絞る（場面の指摘は絞らない）。"""
     p = prompts.build_evaluation_prompt()
     assert "one_point" in p
-    assert "3〜5件" in p
+    assert "改善の指示（次にやること）は one_point の" in p
 
 
 def test_roleplay_prompt_includes_planner_name():
@@ -164,3 +164,19 @@ def test_prompt_requires_a_speakable_line():
     p = prompts.build_evaluation_prompt()
     assert "口に出せるセリフ" in p
     assert "自分への指示" in p
+
+
+def test_prompt_requires_full_meeting_coverage():
+    """商談の前半だけで打ち切らせない指示が入っている。"""
+    p = prompts.build_evaluation_prompt()
+    assert "最後まで" in p
+    assert "序盤" in p and "終盤" in p
+    assert "全長に散っているか" in p
+
+
+def test_prompt_does_not_cap_the_number_of_findings():
+    """件数の上限で網羅性を犠牲にしない。"""
+    p = prompts.build_evaluation_prompt()
+    assert "3〜5件" not in p
+    assert "0〜3件" not in p
+    assert p.count("件数の上限なし") >= 2
