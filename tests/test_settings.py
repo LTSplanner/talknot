@@ -58,3 +58,25 @@ def test_criteria_are_five_and_unique_keys():
     keys = [c.key for c in settings.EVALUATION_CRITERIA]
     assert len(set(keys)) == 5
     assert set(settings.CRITERIA_BY_KEY) == set(keys)
+
+
+class TestCanaryRollout:
+    """先行公開（カナリア）：新機能はまず対象者だけに見せる。"""
+
+    def test_canary_sees_a_flagged_off_feature(self, monkeypatch):
+        monkeypatch.setattr(settings, "_FEATURE_FLAGS", {"xxx": False})
+        assert settings.feature_visible("xxx", "hkumada@life-time-support.com")
+
+    def test_planner_does_not_see_a_flagged_off_feature(self, monkeypatch):
+        monkeypatch.setattr(settings, "_FEATURE_FLAGS", {"xxx": False})
+        assert not settings.feature_visible("xxx", "amoritani@life-time-support.com")
+
+    def test_everyone_sees_it_once_the_flag_is_on(self, monkeypatch):
+        monkeypatch.setattr(settings, "_FEATURE_FLAGS", {"xxx": True})
+        assert settings.feature_visible("xxx", "amoritani@life-time-support.com")
+
+    def test_is_canary_is_case_insensitive_and_safe(self):
+        assert settings.is_canary("HKumada@Life-Time-Support.com")
+        assert not settings.is_canary("amoritani@life-time-support.com")
+        assert not settings.is_canary(None)
+        assert not settings.is_canary("")

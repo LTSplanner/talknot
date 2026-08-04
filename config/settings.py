@@ -221,17 +221,35 @@ _FEATURE_FLAGS = {
 }
 
 
+# --- 先行公開（カナリア）---
+# 新機能・修正は、まずこの人にだけ見せて確認し、問題なければ全員に出す。
+# 管理者は「操作権限」、カナリアは「先行して新機能が見える人」で役割が別。
+# .env の CANARY_EMAILS で差し替えられる（カンマ区切り・複数可）。
+CANARY_EMAILS = _csv_env("CANARY_EMAILS", "hkumada@life-time-support.com")
+
+
+def is_canary(email: str | None) -> bool:
+    """先行公開の対象者か（新機能をフラグOFFのまま見られる人）。"""
+    if not email:
+        return False
+    return email.lower() in {e.lower() for e in CANARY_EMAILS}
+
+
 def feature_enabled(name: str) -> bool:
-    """機能フラグが有効か（未知の名前は False）。"""
+    """機能フラグが有効か＝全員に公開済みか（未知の名前は False）。"""
     return bool(_FEATURE_FLAGS.get(name, False))
 
 
 def feature_visible(name: str, email: str | None) -> bool:
     """その機能をこのユーザーに見せてよいか。
 
-    フラグが有効なら全員に、無効でも管理者にはプレビューとして見せる。
+    公開の段階：
+      1. フラグOFF … 先行公開の対象者（CANARY_EMAILS）だけに見える＝ここで検証
+      2. フラグON  … 全員に見える
+
+    管理者にも見せるのは、確認を頼めるようにするため。プランナーには出ない。
     """
-    return feature_enabled(name) or is_admin(email)
+    return feature_enabled(name) or is_canary(email) or is_admin(email)
 
 
 # --- 評価項目（1〜5段階）---

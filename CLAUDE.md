@@ -52,6 +52,22 @@ python3 scripts/analyze_video.py talk.mp4 # Streamlit抜きで動画解析を試
 - `ui/` — `theme.py`（ブランドカラー・CSS）、`components.py`（ロゴ/ヒーロー/
   評価項目カード/サイドバー）。
 
+### リリースの進め方（必ず守る）
+
+プランナー8名が毎日使うので、**いきなり全員に出さない**。
+まず先行公開の対象者（`settings.CANARY_EMAILS`、既定 `hkumada@`）で確かめ、
+問題なければ全員に出す。**push＝全員公開**（Streamlit Cloud は main を見ている）。
+
+- **画面に出る機能** … `config/settings.py` にフラグを既定OFFで足し、
+  `settings.feature_visible(name, email)` で出し分ける。対象者と管理者だけに見える。
+  確認後にフラグをONにして全員へ。
+- **評価の中身**（プロンプト・称号・採点）… フラグで隠せないので、
+  **push 前に対象者の実データ1件で動かして出力を目視**してから出す。
+- **通知**（Chatリマインド）… `--dry-run` で対象と本文を確認し、
+  対象者へ1通だけ実際に送ってから全員へ。
+
+手順の詳細と判断基準は `docs/RELEASE_FLOW.md`。
+
 ### 重要な約束ごと
 
 - **評価結果の構造を一致させる**: `core/prompts.py` が要求する JSON、
