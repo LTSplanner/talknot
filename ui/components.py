@@ -286,34 +286,108 @@ def _score_rubric() -> None:
         )
 
 
-def _scene_feedback(f, expanded: bool = False) -> None:
-    """1場面の Before → After を表示する。"""
-    c = settings.CRITERIA_BY_KEY.get(f.criterion_key)
-    label = f"{c.icon} {c.title}" if c else f.criterion_key
-    with st.expander(f"⏱ {f.timestamp}　{label}", expanded=expanded):
-        if f.emotion_note:
-            st.caption(f"💗 お客様の感情の動き：{f.emotion_note}")
-        if f.customer_line:
-            st.caption(f"🗣 お客様の発言：「{f.customer_line}」")
-        col_b, col_a = st.columns(2)
-        with col_b:
-            st.markdown("**Before（実際の営業トーク）**")
-            if f.before:
-                st.warning(f.before)
-            else:
-                st.caption("この場面の営業トークは特定できませんでした"
-                           "（お客様の発言との取り違えを検出したため非表示）")
-        with col_a:
-            st.markdown("**After（こう言えたら）**")
-            st.info(f.after)
+def _criterion_label(key: str) -> str:
+    """評価項目の表示名。モデルが知らないキーを返しても生のまま出さない。
+
+    実際に `natural_needs_発掘` のような未定義キーが画面に出たことがあるため、
+    対応表に無ければ中立な見出しに寄せる。
+    """
+    c = settings.CRITERIA_BY_KEY.get(key)
+    return f"{c.icon} {c.title}" if c else "🎬 この場面"
+
+
+def _scene_detail(f) -> None:
+    """1場面の詳細（お客様の様子・発言・Before → After）。"""
+    if f.emotion_note:
+        st.caption(f"💗 お客様の感情の動き：{f.emotion_note}")
+    if f.customer_line:
+        st.caption(f"🗣 お客様の発言：「{f.customer_line}」")
+    col_b, col_a = st.columns(2)
+    with col_b:
+        st.markdown("**Before（実際の営業トーク）**")
+        if f.before:
+            st.warning(f.before)
+        else:
+            st.caption("この場面の営業トークは特定できませんでした"
+                       "（お客様の発言との取り違えを検出したため非表示）")
+    with col_a:
+        st.markdown("**After（こう言えたら）**")
+        st.info(f.after)
+
+
+def _scene_timeline(feedback: list) -> None:
+    """決定的だった場面を、時系列で通して見せる。
+
+    1件ずつ開いて閉じてを繰り返すと商談の流れが頭に入らないので、
+    畳まずに上から順に並べる。
+    """
+    st.caption("この商談の分かれ目になった場面を、時系列で並べています。")
+    for i, f in enumerate(feedback):
+        if i:
+            st.divider()
+        st.markdown(
+            f'<div style="border-left:3px solid {theme.BRAND};padding:.1rem 0 .1rem .7rem;'
+            f'margin:.2rem 0 .5rem">'
+            f'<b style="color:{theme.BRAND_INK}">⏱ {f.timestamp}</b>'
+            f'<span style="color:{theme.MUTED};font-size:.85rem">　'
+            f'{_criterion_label(f.criterion_key)}</span></div>',
+            unsafe_allow_html=True,
+        )
+        _scene_detail(f)
+
+
+def _scores_panel(result: EvaluationResult) -> None:
+    """5項目のスコアと会話配分。"""
+    full = len(settings.EVALUATION_CRITERIA) * 5
+    # 総合スコア1本（旧2軸データは sales_score を総合として表示する）。
+    st.metric("🎯 総合スコア 合計", f"{result.overall_total} / {full}")
+
+    cols = st.columns(len(settings.EVALUATION_CRITERIA))
+    for col, c in zip(cols, settings.EVALUATION_CRITERIA):
+        s = result.score_for(c.key)
+        sales_s = s.sales_score if s else 0
+        sales_cmt = s.sales_comment if s else ""
+        with col:
+            st.markdown(
+                f"""
+                <div class="tk-card">
+                    <div class="tk-icon">{c.icon}</div>
+                    <h4><span class="tk-num">{c.number}</span> {c.title}</h4>
+                    {_score_badge(sales_s)}
+                    <p>{sales_cmt}</p>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+    if result.johari:
+        _johari_meter(result.johari)
+
+
+def _hidden_needs_panel(hidden_needs: list) -> None:
+    """お客様が言葉にしていない不安・疑問。"""
+    st.caption(
+        "お客様が言葉にしていない不安・疑問を、非言語サインから読み取ったものです。"
+        "✅＝営業が踏み込めた／⚠️＝表面で流した。"
+    )
+    for h in hidden_needs:
+        caught = "✅ 踏み込めた" if h.surfaced else "⚠️ 取りこぼし"
+        head = f"⏱ {h.timestamp}　{caught}" if h.timestamp else caught
+        st.markdown(f"**{head}　— {h.inferred_need}**")
+        if h.signal:
+            st.caption(f"🫧 読み取ったサイン：{h.signal}")
+        if h.note:
+            (st.info if h.surfaced else st.warning)(h.note)
 
 
 def evaluation_result(result: EvaluationResult) -> None:
     """評価結果を表示する。
 
-    読む順番は「前回の宿題ができたか → 今回の1点 → その根拠になった場面」。
-    点数・会話配分・隠れたニーズ・攻略メモは畳んでおき、見たい人だけが開く。
-    見る項目が多いと何を改善すべきか分からなくなるため、既定では絞って見せる。
+    最上部は「前回の宿題ができたか → 今回の1点」だけ。ここだけ読めば
+    次の商談で試すことが分かる。
+    詳細は5つのタブ（決定的／スコア／ニーズ／メモ／振り返り）に分ける。
+    以前は畳んだ見出しを縦に積んでいたが、場面ごとの開閉と section の開閉が
+    同じ見た目で混ざり、どこに何があるか分からなくなっていた。
     """
     _follow_up_card(result.follow_up)
 
@@ -325,60 +399,28 @@ def evaluation_result(result: EvaluationResult) -> None:
         st.markdown("##### 全体の振り返り")
         st.success(result.summary)
 
-    if result.feedback:
-        st.markdown("##### 🎬 決定的だった場面（Before → After）")
-        st.caption("この商談の分かれ目になった場面だけを抜き出しています。")
-        for i, f in enumerate(result.feedback):
-            _scene_feedback(f, expanded=(i == 0))
-
+    # 中身があるタブだけを作る（空のタブを開かせない）。
     full = len(settings.EVALUATION_CRITERIA) * 5
-    with st.expander(f"📊 スコアの詳細（{result.overall_total} / {full}）と会話配分"):
-        # 総合スコア1本（旧2軸データは sales_score を総合として表示する）。
-        st.metric("🎯 総合スコア 合計", f"{result.overall_total} / {full}")
-
-        cols = st.columns(len(settings.EVALUATION_CRITERIA))
-        for col, c in zip(cols, settings.EVALUATION_CRITERIA):
-            s = result.score_for(c.key)
-            sales_s = s.sales_score if s else 0
-            sales_cmt = s.sales_comment if s else ""
-            with col:
-                st.markdown(
-                    f"""
-                    <div class="tk-card">
-                        <div class="tk-icon">{c.icon}</div>
-                        <h4><span class="tk-num">{c.number}</span> {c.title}</h4>
-                        {_score_badge(sales_s)}
-                        <p>{sales_cmt}</p>
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
-                )
-
-        if result.johari:
-            _johari_meter(result.johari)
-
+    panels: list[tuple[str, callable]] = []
+    if result.feedback:
+        panels.append((f"🎬 決定的（{len(result.feedback)}）",
+                       lambda: _scene_timeline(result.feedback)))
+    if result.scores:
+        panels.append((f"📊 スコア（{result.overall_total}/{full}）",
+                       lambda: _scores_panel(result)))
     if result.hidden_needs:
-        with st.expander(f"🔍 お客様の隠れたニーズ（{len(result.hidden_needs)}件）"):
-            st.caption(
-                "お客様が言葉にしていない不安・疑問を、非言語サインから読み取ったものです。"
-                "✅＝営業が踏み込めた／⚠️＝表面で流した。"
-            )
-            for h in result.hidden_needs:
-                caught = "✅ 踏み込めた" if h.surfaced else "⚠️ 取りこぼし"
-                head = f"⏱ {h.timestamp}　{caught}" if h.timestamp else caught
-                st.markdown(f"**{head}　— {h.inferred_need}**")
-                if h.signal:
-                    st.caption(f"🫧 読み取ったサイン：{h.signal}")
-                if h.note:
-                    (st.info if h.surfaced else st.warning)(h.note)
-
+        panels.append((f"🔍 ニーズ（{len(result.hidden_needs)}）",
+                       lambda: _hidden_needs_panel(result.hidden_needs)))
     if result.customer_profile:
-        with st.expander("🧭 このお客様の攻略メモ（次回の活かし方）"):
-            _customer_profile(result.customer_profile)
-
+        panels.append(("🧭 メモ", lambda: _customer_profile(result.customer_profile)))
     if op and result.summary:
-        with st.expander("📝 全体の振り返り"):
-            st.success(result.summary)
+        panels.append(("📝 振り返り", lambda: st.success(result.summary)))
+
+    if not panels:
+        return
+    for tab, (_, render) in zip(st.tabs([label for label, _ in panels]), panels):
+        with tab:
+            render()
 
 
 def _badge_tile(status) -> str:

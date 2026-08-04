@@ -186,6 +186,7 @@ def build_evaluation_prompt(
     meeting_context: dict | None = None,
     previous_one_point: dict | None = None,
 ) -> str:
+    criteria_keys = " / ".join(c.key for c in settings.EVALUATION_CRITERIA)
     criteria_lines = "\n".join(
         f"- {c.key} ({c.number} {c.title}): {c.description}"
         for c in settings.EVALUATION_CRITERIA
@@ -346,7 +347,7 @@ signal・inferred_need・note、feedback、summary を含め、英語を混ぜ�
   }},
   "feedback": [{{
     "timestamp": "MM:SS",
-    "criterion_key": "<関連する評価項目key>",
+    "criterion_key": "<上の『評価項目』のkeyをそのまま1つ。{criteria_keys} 以外は絶対に書かない（画面にそのまま出るため）>",
     "emotion_note": "<その瞬間のお客様の感情・様子（どう感じていたかの説明）>",
     "customer_line": "<きっかけになった【お客様】の発言を、言った言葉のまま。お客様の言葉はすべてここに書く>",
     "before": "<その直後に【営業担当（提案・ヒアリング・見積り案内をする側）】が実際に返した発言だけを、話した言葉のまま。customer_line と同じ内容を書いてはいけない。話者名の接頭辞（『◯◯:』等）は付けない>",
