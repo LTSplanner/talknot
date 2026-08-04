@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import datetime as _dt
+import json
 from dataclasses import dataclass
 
 from config import settings
@@ -70,12 +71,33 @@ def is_roleplay(record: dict) -> bool:
     return str(record.get("label", "")).startswith(_ROLEPLAY_PREFIX)
 
 
+def result_of(record: dict) -> dict | None:
+    """1件の評価結果を dict で返す。読めなければ None。
+
+    呼び出し元によって形が違うため、両方を受け取れるようにしている：
+      - storage.list_evaluations() … 解析済みの dict が result に入る
+      - sheets_knowledge.load_evaluations() … 生の JSON 文字列が result_json に入る
+    片方しか見ないと、シートの生データを渡したときに全件弾かれてしまう。
+    """
+    res = record.get("result")
+    if isinstance(res, dict):
+        return res
+    raw = record.get("result_json")
+    if isinstance(raw, str) and raw.strip():
+        try:
+            parsed = json.loads(raw)
+        except ValueError:
+            return None
+        return parsed if isinstance(parsed, dict) else None
+    return None
+
+
 def _usable(records: list[dict], category: str) -> list[dict]:
     """判定に使える履歴（完了かつ結果あり）を、古い順に並べて返す。"""
     want_roleplay = category == "roleplay"
     out = [
         r for r in (records or [])
-        if r.get("status") == "done" and isinstance(r.get("result"), dict)
+        if r.get("status") == "done" and result_of(r) is not None
         and is_roleplay(r) == want_roleplay
     ]
     out.sort(key=lambda r: str(r.get("saved_at", "")))
@@ -102,20 +124,71 @@ def _max_run(flags: list[bool]) -> int:
     return best
 
 
+def _parse_days(dates: list[str]) -> list[_dt.date]:
+    """"YYYY-MM-DD" の並びを、重複を除いた日付の昇順リストにする。"""
+    out = set()
+    for d in dates:
+        try:
+            out.add(_dt.date.fromisoformat(d))
+        except (ValueError, TypeError):
+            continue
+    return sorted(out)
+
+
+def _is_connected(prev: _dt.date, cur: _dt.date) -> bool:
+    """prev の次の実施日が cur なら「連続」とみなすか。
+
+    間にあるのが土日だけなら連続として扱う（金→月は連続）。プランナーは
+    平日勤務なので、暦日で数えると週末で必ず途切れ、「7日つづけて」以上が
+    誰にも取れない称号になってしまうため。
+    ※祝日は判定材料が無いので途切れる（安全側）。
+    """
+    if cur <= prev:
+        return False
+    day = prev + _dt.timedelta(days=1)
+    while day < cur:
+        if day.weekday() < 5:      # 平日が挟まっていれば、それは飛ばした日
+            return False
+        day += _dt.timedelta(days=1)
+    return True
+
+
 def _max_consecutive_days(dates: list[str]) -> int:
-    """実施日（YYYY-MM-DD）が最大何日連続したか。"""
-    days = sorted({d for d in dates if d})
+    """実施日が最大何日つづいたか（土日は挟んでもよい）。"""
     best = run = 0
     prev: _dt.date | None = None
-    for d in days:
-        try:
-            cur = _dt.date.fromisoformat(d)
-        except ValueError:
-            continue
-        run = run + 1 if prev and (cur - prev).days == 1 else 1
+    for cur in _parse_days(dates):
+        run = run + 1 if prev and _is_connected(prev, cur) else 1
         best = max(best, run)
         prev = cur
     return best
+
+
+def current_day_streak(records: list[dict], category: str, today: str) -> int:
+    """今つながっている連続日数を返す（土日は挟んでもよい）。
+
+    「今日やれば◯日連続」とリマインドで伝えるために使う。最後の実施日が
+    今日または直前の営業日でなければ、記録は途切れているので 0 を返す。
+    """
+    try:
+        today_d = _dt.date.fromisoformat(today)
+    except (ValueError, TypeError):
+        return 0
+
+    days = _parse_days([str(r.get("saved_at", ""))[:10] for r in _usable(records, category)])
+    days = [d for d in days if d <= today_d]
+    if not days:
+        return 0
+    # 最後の実施日が今日でも直前の営業日でもないなら、連続は切れている。
+    if days[-1] != today_d and not _is_connected(days[-1], today_d):
+        return 0
+
+    streak = 1
+    for prev, cur in zip(reversed(days[:-1]), reversed(days[1:])):
+        if not _is_connected(prev, cur):
+            break
+        streak += 1
+    return streak
 
 
 def compute_metrics(records: list[dict], category: str) -> dict[str, float]:
@@ -125,7 +198,7 @@ def compute_metrics(records: list[dict], category: str) -> dict[str, float]:
     category は "roleplay" / "meeting"。
     """
     rows = _usable(records, category)
-    results = [r["result"] for r in rows]
+    results = [result_of(r) for r in rows]
     totals = [_total(res) for res in results]
     dates = [str(r.get("saved_at", ""))[:10] for r in rows]
 

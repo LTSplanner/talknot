@@ -24,7 +24,7 @@ import os
 import sys
 
 from config import settings
-from core import reminders
+from core import badges, reminders
 from services import google_calendar, google_chat, sheets_knowledge
 
 _APP_URL = "https://talknot-lts.streamlit.app"
@@ -180,12 +180,25 @@ def _variant_index(email: str, today: str) -> int:
     return (day_no + offset) % len(_MESSAGES)
 
 
+def _streak_line(streak: int) -> str:
+    """「今日やれば◯日連続」の一行。記録が途切れている人には出さない。
+
+    0日の人に「今日やれば1日連続」と言っても意味が無く、むしろ途切れた事実を
+    突きつけることになるので、続いている人にだけ添える。
+    """
+    if streak < 1:
+        return ""
+    return f"\n\n🔥 今日やれば {streak + 1} 日つづけて達成です。"
+
+
 def _message_for(
-    email: str, display_names: dict[str, str] | None = None, today: str = ""
+    email: str, display_names: dict[str, str] | None = None, today: str = "",
+    streak: int = 0,
 ) -> str:
-    """その人・その日のリマインド本文（＋アプリURL）。"""
+    """その人・その日のリマインド本文（＋連続記録＋アプリURL）。"""
     body = _MESSAGES[_variant_index(email, today)]
-    return f"{body.format(name=_name_of(email, display_names))}\n{_APP_URL}"
+    return (f"{body.format(name=_name_of(email, display_names))}"
+            f"{_streak_line(streak)}\n{_APP_URL}")
 
 
 def main() -> int:
@@ -233,7 +246,16 @@ def main() -> int:
 
     # 「s.kageyamaさん」ではなく「景山冴香さん」と呼びかける（表示名が取れた人だけ）。
     names = _display_names(missed, sa_info)
-    email_to_text = {email: _message_for(email, names, today) for email in missed}
+    # 「今日やれば◯日連続」を添えるため、今つながっている連続日数を人ごとに出す。
+    streaks = {
+        email: badges.current_day_streak(
+            [r for r in records if r.get("user_email") == email], "roleplay", today)
+        for email in missed
+    }
+    email_to_text = {
+        email: _message_for(email, names, today, streaks.get(email, 0))
+        for email in missed
+    }
 
     if args.dry_run:
         print("[dry-run] 送信は行いません。本文プレビュー:")

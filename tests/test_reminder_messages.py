@@ -82,3 +82,21 @@ def test_every_variant_is_short_enough_to_read():
 def test_bad_date_does_not_crash():
     """日付が壊れていても送信は止めない。"""
     assert _message_for(ALICE, {}, "") .startswith("🎙️")
+
+
+def test_streak_line_appears_only_when_the_record_is_alive():
+    """続いている人にだけ『今日やれば◯日』を添える。"""
+    assert reminders_script._streak_line(0) == ""
+    assert "2 日" in reminders_script._streak_line(1)
+    assert "6 日" in reminders_script._streak_line(5)
+
+
+def test_message_includes_the_streak():
+    text = _message_for(ALICE, {ALICE: "森谷淳美"}, "2026-08-04", streak=4)
+    assert "今日やれば 5 日つづけて達成です。" in text
+    assert text.endswith("https://talknot-lts.streamlit.app")
+
+
+def test_message_without_streak_has_no_extra_line():
+    text = _message_for(ALICE, {ALICE: "森谷淳美"}, "2026-08-04", streak=0)
+    assert "つづけて達成" not in text

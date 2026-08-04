@@ -160,3 +160,63 @@ def test_all_badges_reference_a_real_metric():
     keys = set(badges.compute_metrics([], "roleplay"))
     for b in ALL_BADGES:
         assert b.metric in keys, f"{b.id} の指標 {b.metric} が計算されていない"
+
+
+def test_weekend_does_not_break_a_streak():
+    """金→月は連続。暦日で数えると週末で必ず切れ、7日以上が誰にも取れなくなる。"""
+    # 2026-08-07(金), 08-10(月), 08-11(火)
+    recs = [_rec(d + " 10:00") for d in ("2026-08-07", "2026-08-10", "2026-08-11")]
+    assert badges.compute_metrics(recs, "roleplay")["day_streak"] == 3
+
+
+def test_skipping_a_weekday_breaks_the_streak():
+    """平日を飛ばしたら連続は切れる。"""
+    # 08-10(月), 08-12(水) … 11日(火)を飛ばしている
+    recs = [_rec(d + " 10:00") for d in ("2026-08-10", "2026-08-12")]
+    assert badges.compute_metrics(recs, "roleplay")["day_streak"] == 1
+
+
+def test_current_streak_counts_up_to_today():
+    """今つながっている連続日数（今日は未実施でも、直前まで続いていれば数える）。"""
+    recs = [_rec(d + " 10:00") for d in ("2026-08-10", "2026-08-11", "2026-08-12")]
+    assert badges.current_day_streak(recs, "roleplay", "2026-08-13") == 3
+
+
+def test_current_streak_bridges_the_weekend():
+    """金曜まで続いていれば、月曜の時点でも記録は生きている。"""
+    recs = [_rec(d + " 10:00") for d in ("2026-08-06", "2026-08-07")]
+    assert badges.current_day_streak(recs, "roleplay", "2026-08-10") == 2
+
+
+def test_current_streak_is_zero_when_broken():
+    """間があいたら0（『今日やれば◯日連続』を出さない）。"""
+    recs = [_rec(d + " 10:00") for d in ("2026-08-03", "2026-08-04")]
+    assert badges.current_day_streak(recs, "roleplay", "2026-08-13") == 0
+
+
+def test_current_streak_counts_today_itself():
+    recs = [_rec("2026-08-12 10:00"), _rec("2026-08-13 09:00")]
+    assert badges.current_day_streak(recs, "roleplay", "2026-08-13") == 2
+
+
+def test_current_streak_ignores_future_and_bad_dates():
+    assert badges.current_day_streak([], "roleplay", "2026-08-13") == 0
+    assert badges.current_day_streak([_rec("2026-08-20 10:00")], "roleplay", "2026-08-13") == 0
+    assert badges.current_day_streak([_rec("2026-08-12 10:00")], "roleplay", "ない日付") == 0
+
+
+def test_raw_sheet_rows_are_accepted():
+    """シートの生データ（result_json 文字列）でも判定できる。
+
+    リマインドは sheets_knowledge.load_evaluations() の行をそのまま渡すため、
+    result（辞書）しか見ないと全件弾かれて連続日数が常に0になってしまう。
+    """
+    import json as _json
+
+    rec = _rec("2026-08-10 10:00", total=20)
+    raw = {"saved_at": rec["saved_at"], "status": "done", "label": rec["label"],
+           "result_json": _json.dumps(rec["result"])}
+    m = badges.compute_metrics([raw], "roleplay")
+    assert m["count"] == 1
+    assert m["best_total"] == 20
+    assert badges.current_day_streak([raw], "roleplay", "2026-08-11") == 1
