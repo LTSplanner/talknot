@@ -71,15 +71,42 @@ def _filter_out_dayoff(
     return to_send, dayoff
 
 
-def _name_of(email: str) -> str:
-    """メールのローカル部を表示名代わりに使う（氏名マスタが無いため）。"""
-    return (email or "").split("@", 1)[0]
+def _display_names(emails: list[str], sa_info: dict | None) -> dict[str, str]:
+    """Workspace の表示名（例「熊田遥輝」）をまとめて引く。
+
+    DWD の SA で本人になりすまし、Drive の about.get から氏名を取る。
+    Directory API と違い管理者権限が要らず、既存のスコープだけで動く。
+    取れなかった人は空文字にして、呼び出し側でメールのローカル部に戻す。
+    """
+    names: dict[str, str] = {}
+    if not sa_info:
+        return names
+
+    from google.oauth2 import service_account
+
+    from services import google_drive
+
+    scopes = ["https://www.googleapis.com/auth/drive.readonly"]
+    for email in emails:
+        try:
+            creds = service_account.Credentials.from_service_account_info(
+                sa_info, scopes=scopes).with_subject(email)
+            names[email] = google_drive.get_display_name(creds)
+        except Exception:  # noqa: BLE001 取れない人だけ諦める
+            names[email] = ""
+    return names
 
 
-def _message_for(email: str) -> str:
+def _name_of(email: str, display_names: dict[str, str] | None = None) -> str:
+    """呼びかけに使う名前。表示名が取れていればそれ、無ければメールのローカル部。"""
+    name = (display_names or {}).get(email, "")
+    return name or (email or "").split("@", 1)[0]
+
+
+def _message_for(email: str, display_names: dict[str, str] | None = None) -> str:
     """前向き＆短いリマインド本文（＋アプリURL）。"""
     return (
-        f"🎙️ {_name_of(email)}さん、今日のロープレはまだ1本残っています。\n"
+        f"🎙️ {_name_of(email, display_names)}さん、今日のロープレはまだ1本残っています。\n"
         "5分でOK、続けた分だけ商談が変わります。今からサッと1本いきましょう！\n"
         f"{_APP_URL}"
     )
@@ -113,6 +140,7 @@ def main() -> int:
     # 休みスキップ：カレンダーSAが使えるなら、その日が終日休みの人を送信対象から外す。
     # SA未設定・取得失敗時は「その人は通常どおり送る」（安全側）。
     dayoff: list[str] = []
+    sa_info: dict | None = None
     if missed:
         sa_info = _calendar_sa_info()
         if sa_info is None:
@@ -127,7 +155,9 @@ def main() -> int:
         print("送る対象なし。リマインド不要。")
         return 0
 
-    email_to_text = {email: _message_for(email) for email in missed}
+    # 「s.kageyamaさん」ではなく「景山冴香さん」と呼びかける（表示名が取れた人だけ）。
+    names = _display_names(missed, sa_info)
+    email_to_text = {email: _message_for(email, names) for email in missed}
 
     if args.dry_run:
         print("[dry-run] 送信は行いません。本文プレビュー:")

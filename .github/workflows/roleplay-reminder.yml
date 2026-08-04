@@ -15,7 +15,11 @@ name: roleplay-reminder
 
 on:
   schedule:
-    - cron: "0 6 * * 1-5"   # 06:00 UTC = 15:00 JST の平日(月〜金)
+    # 03:40 UTC = 12:40 JST（平日）。狙いは「15時前後に届くこと」。
+    # GitHub の定期実行はこのリポジトリで常に 1.4〜3.2 時間遅れて起動するため
+    # （daily-minutes の実績：86〜194分）、その分を差し引いて前倒ししている。
+    # 実際の到着はおおむね 14:00〜16:00 JST。毎時0分は混雑して遅延が伸びるので避ける。
+    - cron: "40 3 * * 1-5"
   workflow_dispatch:          # 手動実行も可
 
 concurrency:
