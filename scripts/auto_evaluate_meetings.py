@@ -119,6 +119,16 @@ def _collect(targets: list[str], sa_info: dict, lookback_days: int):
     return candidates, done
 
 
+def _log(message: str) -> None:
+    """経過が追えるよう、時刻つきで出す。
+
+    長尺の録画では1件に数十分かかる。どの工程で時間を使っているかが分からないと、
+    タイムアウトしたときに原因を特定できない（実際にログが1行も無い状態で
+    120分キャンセルされた）。
+    """
+    print(f"[{time.strftime('%H:%M:%S')}] {message}", flush=True)
+
+
 def _process_one(
     candidate: dict, creds, reference_talk, knowledge, planner_name: str = ""
 ) -> str:
@@ -140,8 +150,13 @@ def _process_one(
 
     fd, tmp = tempfile.mkstemp(suffix=".mp4")
     os.close(fd)
+    started = time.time()
     try:
+        _log(f"  ダウンロード開始: {rec.get('name', '')[:50]}")
         google_drive.download_to_path(creds, rec["id"], tmp)
+        size_mb = os.path.getsize(tmp) / 1024 / 1024
+        _log(f"  ダウンロード完了: {size_mb:.0f}MB / {time.time() - started:.0f}秒")
+        _log("  AI解析を開始（長尺は数十分かかります）")
         # 前回この人に出した「1点」を渡し、できたかの答え合わせから始めさせる。
         try:
             previous = latest_one_point(storage.list_evaluations(planner))
@@ -149,6 +164,8 @@ def _process_one(
             previous = None
         result = gemini_analyzer.analyze(
             tmp, reference_talk, knowledge, context, previous)
+        _log(f"  AI解析が完了: 通算 {time.time() - started:.0f}秒 "
+             f"/ 指摘 {len(result.feedback)}件")
         storage.save_evaluation(planner, result, label=summary)
         return "評価を保存"
     except Exception as e:  # noqa: BLE001 1件の失敗で全体を止めない

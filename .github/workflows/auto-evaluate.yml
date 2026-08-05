@@ -25,7 +25,9 @@ concurrency:
 jobs:
   evaluate:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    # 1件あたり長尺（2〜3時間の録画）だと、DL＋解析で数十分かかる。
+    # 120分では1件も終わらずキャンセルされたため、上限（6時間）近くまで広げる。
+    timeout-minutes: 350
     steps:
       - uses: actions/checkout@v4
 
@@ -40,6 +42,9 @@ jobs:
         env:
           # リポジトリ直下を import パスに通す（`from services import ...` 用）。
           PYTHONPATH: .
+          # 出力をバッファさせない。タイムアウトで強制終了されるとバッファごと
+          # 失われ、ログが1行も残らずに原因を追えなくなるため。
+          PYTHONUNBUFFERED: "1"
           CALENDAR_SA_JSON: ${{ secrets.CALENDAR_SA_JSON }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           KNOWLEDGE_SHEET_ID: ${{ secrets.KNOWLEDGE_SHEET_ID }}
