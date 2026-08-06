@@ -208,3 +208,16 @@ def test_no_segment_block_without_a_duration():
     """長さが取れなかったときは、この節を出さない（嘘の区間を示さない）。"""
     assert "拾うべき時間帯" not in prompts.build_evaluation_prompt()
     assert "拾うべき時間帯" not in prompts.build_evaluation_prompt(duration_sec=0)
+
+
+def test_prompt_forbids_quoting_possibly_misheard_words():
+    """聞き取れていない語を、お客様に聞き返すセリフにしない。
+
+    実際に「小宮山様のおっしゃる『最低面積』とは」という、言っていない言葉を
+    本人にぶつける一言が出た。
+    """
+    p = prompts.build_evaluation_prompt()
+    assert "お客様の言葉を引用して聞き返すセリフは書かない" in p
+    assert "同じ軸" in p          # 課題と次の一言の軸を揃える
+    assert "一般論" in p          # 理由に一般論を書かせない
+    assert "自然な日本語" in p
