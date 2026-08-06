@@ -83,3 +83,15 @@ def test_loads_lenient_only_repairs_when_asked():
 def test_loads_lenient_strips_code_fence():
     fenced = '```json\n{"summary": "よい商談"}\n```'
     assert _loads_lenient(fenced)["summary"] == "よい商談"
+
+
+def test_transient_network_errors_are_retried():
+    """通信断は待って投げ直す（長い応答の生成中に実際に3件failした）。"""
+    from services.gemini_analyzer import _is_transient
+
+    assert _is_transient(Exception("Server disconnected without sending a response."))
+    assert _is_transient(Exception("Connection reset by peer"))
+    assert _is_transient(Exception("503 Service Unavailable"))
+    # 内容の誤りは投げ直さない（何度やっても同じ）
+    assert not _is_transient(Exception("400 INVALID_ARGUMENT: bad request"))
+    assert not _is_transient(Exception("API key not valid"))

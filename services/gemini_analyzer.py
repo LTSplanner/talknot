@@ -173,6 +173,20 @@ def _is_rate_limit(exc: Exception) -> bool:
                                 "quota", "rate limit", "rate_limit"))
 
 
+def _is_transient(exc: Exception) -> bool:
+    """待てば直る一時的な通信エラーか。
+
+    長い応答の生成中に接続が切れることがあり、実際に長尺の商談3件が
+    "Server disconnected without sending a response." で失敗した。
+    内容の問題ではないので、待って投げ直せば通ることが多い。
+    """
+    s = str(exc).lower()
+    return any(k in s for k in (
+        "server disconnected", "connection reset", "connection aborted",
+        "remote end closed", "timed out", "timeout", "502", "503", "504",
+    ))
+
+
 def _generate_retrying(client: genai.Client, contents: list, cfg):
     """generate_content を実行。429 のときだけ待って再試行する（他エラーは即送出）。"""
     last: Exception | None = None
@@ -184,7 +198,8 @@ def _generate_retrying(client: genai.Client, contents: list, cfg):
                 model=settings.GEMINI_MODEL, contents=contents, config=cfg)
         except Exception as e:  # noqa: BLE001
             last = e
-            if not _is_rate_limit(e):
+            # レート上限と一時的な通信断だけ待って投げ直す（内容の誤りは即送出）。
+            if not (_is_rate_limit(e) or _is_transient(e)):
                 raise
     raise last  # type: ignore[misc]
 
