@@ -138,9 +138,9 @@ def test_spec_meetings_are_excluded():
 
 
 def test_real_first_meetings_are_still_targeted():
-    """商談のタイトルはこれまでどおり対象のまま。"""
+    """オンラインの初回商談はこれまでどおり対象のまま。"""
     assert auto_eval.is_first_meeting("◎初回商談 オンライン L260726486501　矢野淳也様｜江戸川区新築マンション")
-    assert auto_eval.is_first_meeting("初回商談 SR L260722484601　福島慶紀様｜朝霞市三原3丁目")
+    assert auto_eval.is_first_meeting("○初回商談 オンライン L260729487401　西依尚士様｜ザグランクロス多摩センター")
 
 
 class TestDoneCaseIds:
@@ -168,3 +168,19 @@ class TestDoneCaseIds:
     def test_success_after_failures_stays_finished(self):
         recs = [self._rec("L1234567", "error"), self._rec("L1234567", "done")]
         assert auto_eval.done_case_ids(recs) == {"L1234567"}
+
+
+def test_showroom_meetings_are_excluded():
+    """SR（ショールーム）の対面商談は自動評価しない。"""
+    assert not auto_eval.is_first_meeting("◎初回商談 SR L260722484801　周鈺庭様｜MID FRONT")
+    assert not auto_eval.is_first_meeting("初回商談 SR L260722484601　福島慶紀様")
+
+
+def test_sr_inside_another_word_does_not_exclude():
+    """「SRC造」のように他の語の一部と一致したときは除外しない。"""
+    assert auto_eval.is_first_meeting("◎初回商談 オンライン L260722484801　SRC造の物件")
+
+
+def test_online_meetings_are_still_targeted():
+    assert auto_eval.is_first_meeting(
+        "◎初回商談 オンライン L260718483201　篠崎颯将様｜クレストフォルム横浜踊場")

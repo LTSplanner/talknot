@@ -19,6 +19,10 @@ _FIRST_MEETING_KEYWORD = "初回"
 # 仕様を詰める打合せなので、営業トークの評価軸に合わない。
 _EXCLUDE_KEYWORDS = ("仕様",)
 
+# SR（ショールーム）での対面商談も対象外。オンライン商談と条件が違うため。
+# 「SRC造」のように他の語の一部と一致しないよう、独立した語のときだけ弾く。
+_EXCLUDE_TOKEN_RE = re.compile(r"(?<![A-Za-z])SR(?![A-Za-z])")
+
 # 案件番号（例: L260721484101）。全角Ｌ・間の空白も許容。google_calendar と同じ形。
 _CASE_ID_RE = re.compile(r"[LＬ]\s*\d{6,}")
 
@@ -26,13 +30,16 @@ _CASE_ID_RE = re.compile(r"[LＬ]\s*\d{6,}")
 def is_first_meeting(summary: str) -> bool:
     """予定タイトルが自動評価の対象（初回商談）か。
 
-    「初回」を含み、かつ「仕様」を含まないものだけを対象にする。
-    「初回仕様MT」は初回だが商談ではなく仕様を詰める打合せなので除外する。
+    「初回」を含み、かつ「仕様」「SR」を含まないものだけを対象にする。
+    - 「初回仕様MT」は初回だが、商談ではなく仕様を詰める打合せなので除外。
+    - 「SR」はショールームでの対面商談。オンライン商談と条件が違うので除外。
 
     案件番号（L付き）かどうかは list_meetings 側（deals_only）で既に絞られている想定。
     """
     text = summary or ""
     if any(w in text for w in _EXCLUDE_KEYWORDS):
+        return False
+    if _EXCLUDE_TOKEN_RE.search(text):
         return False
     return _FIRST_MEETING_KEYWORD in text
 
