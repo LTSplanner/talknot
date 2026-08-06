@@ -141,3 +141,30 @@ def test_real_first_meetings_are_still_targeted():
     """商談のタイトルはこれまでどおり対象のまま。"""
     assert auto_eval.is_first_meeting("◎初回商談 オンライン L260726486501　矢野淳也様｜江戸川区新築マンション")
     assert auto_eval.is_first_meeting("初回商談 SR L260722484601　福島慶紀様｜朝霞市三原3丁目")
+
+
+class TestDoneCaseIds:
+    """再評価の対象から外す案件の判定。"""
+
+    def _rec(self, case_id, status="done"):
+        return {"label": f"◎初回商談 {case_id}　佐藤様", "status": status}
+
+    def test_success_is_treated_as_finished(self):
+        assert auto_eval.done_case_ids([self._rec("L260722484601")]) == {"L260722484601"}
+
+    def test_a_failure_is_retried(self):
+        """無料枠の枠切れ(429)で落ちた商談を、翌日また拾えるようにする。"""
+        assert auto_eval.done_case_ids([self._rec("L260722484601", "error")]) == set()
+
+    def test_repeated_failures_are_given_up(self):
+        """毎日同じ商談で失敗し続けるのを避ける（内容の問題とみなす）。"""
+        recs = [self._rec("L260722484601", "error")] * auto_eval.MAX_RETRY_ON_ERROR
+        assert auto_eval.done_case_ids(recs) == {"L260722484601"}
+
+    def test_processing_is_not_started_twice(self):
+        assert auto_eval.done_case_ids(
+            [self._rec("L260722484601", "processing")]) == {"L260722484601"}
+
+    def test_success_after_failures_stays_finished(self):
+        recs = [self._rec("L1234567", "error"), self._rec("L1234567", "done")]
+        assert auto_eval.done_case_ids(recs) == {"L1234567"}

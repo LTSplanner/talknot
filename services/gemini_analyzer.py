@@ -35,6 +35,10 @@ _MAX_OUTPUT_TOKENS = 65536
 # 商談評価には多少の推論が要るので 0（無効）にはせず、上限だけ抑える。
 _THINKING_BUDGET = int(os.getenv("GEMINI_THINKING_BUDGET", "8192"))
 
+# 区間ごとの解析の間に空ける秒数。無料枠は「1分あたりのトークン数」に上限があり、
+# 大きな区間を続けて投げると枠切れ(429)になる。待てば回復するので間隔を空ける。
+_CHUNK_INTERVAL_SEC = int(os.getenv("GEMINI_CHUNK_INTERVAL_SEC", "20"))
+
 # JSON厳守を促す追記（リトライ時にプロンプト末尾へ付ける）
 _STRICT_JSON = ("\n\n重要：応答は有効なJSONオブジェクトのみを返すこと。"
                 "途中で切らず、コードフェンス(```)や前後の説明文を一切付けない。")
@@ -342,6 +346,8 @@ def analyze(
     else:
         parts = []
         for i, (start, end) in enumerate(chunks, 1):
+            if i > 1:
+                time.sleep(_CHUNK_INTERVAL_SEC)   # 分あたりの上限に当たらないよう間を空ける
             print(f"    区間 {i}/{len(chunks)}: "
                   f"{chunking.format_timestamp(start)}〜{chunking.format_timestamp(end)}",
                   flush=True)

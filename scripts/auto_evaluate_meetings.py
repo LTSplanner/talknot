@@ -30,7 +30,7 @@ import tempfile
 import time
 
 from config import settings
-from core.auto_eval import case_ids_in, is_first_meeting, select_targets
+from core.auto_eval import done_case_ids, is_first_meeting, select_targets
 from core.meeting_context import build_meeting_context
 from core.progress import latest_one_point
 from services import gemini_analyzer, google_calendar, google_drive, storage
@@ -108,11 +108,10 @@ def _collect(targets: list[str], sa_info: dict, lookback_days: int):
                 "start_date": m.get("start_date", ""),
             })
 
-        # 2) 既存の評価履歴（done/error/processing 問わず）の label から案件番号を拾い、
-        #    二重処理・無限リトライを防ぐ。
+        # 2) 既存の評価履歴から「もう評価しなくてよい案件」を集める。
+        #    失敗は再挑戦の対象（無料枠の枠切れで落ちた商談を取りこぼさない）。
         try:
-            for rec in storage.list_evaluations(planner):
-                done |= case_ids_in(rec.get("label", ""))
+            done |= done_case_ids(storage.list_evaluations(planner))
         except Exception as e:  # noqa: BLE001 履歴が読めなくても評価自体は進める
             print(f"  評価履歴の読込み失敗（重複除外に反映されず）: {planner}: {str(e)[:120]}")
 

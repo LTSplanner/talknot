@@ -42,6 +42,34 @@ def _norm_case_id(case_id: str) -> str:
     return re.sub(r"\s", "", case_id or "")
 
 
+# 同じ案件で失敗が何回まで続いたら諦めるか。無料枠の枠切れ(429)は待てば直るので
+# 再挑戦したいが、内容の問題で必ず失敗する商談を毎日引き続けても意味がない。
+MAX_RETRY_ON_ERROR = 3
+
+
+def done_case_ids(records: list[dict]) -> set[str]:
+    """再評価しなくてよい案件番号を返す。
+
+    - 成功(done)した案件は完了とみなす。
+    - 失敗(error)は**再挑戦の対象**にする。無料枠の枠切れで落ちた商談を
+      永久に取りこぼさないため。ただし同じ案件で MAX_RETRY_ON_ERROR 回
+      失敗していたら、内容の問題とみなして諦める。
+    - 解析中(processing)は二重に走らせない。
+    """
+    done: set[str] = set()
+    failures: dict[str, int] = {}
+    for rec in records or []:
+        ids = case_ids_in(rec.get("label", ""))
+        status = rec.get("status", "done")
+        if status == "error":
+            for cid in ids:
+                failures[cid] = failures.get(cid, 0) + 1
+        else:
+            done |= ids
+    done |= {cid for cid, n in failures.items() if n >= MAX_RETRY_ON_ERROR}
+    return done
+
+
 def case_ids_in(text: str) -> set[str]:
     """テキスト（評価履歴の label 等）に含まれる案件番号を正規化して返す。
 

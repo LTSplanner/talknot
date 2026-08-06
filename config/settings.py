@@ -76,8 +76,10 @@ MAX_CONCURRENT_ANALYSES = _int_env("MAX_CONCURRENT_ANALYSES", 1)
 
 # --- 初回商談の自動評価バッチ（scripts/auto_evaluate_meetings.py）---
 # 1日あたりに自動評価する件数の上限（全プランナー合算・古い未処理から順に処理）。
-# 無料枠・メモリ保護のため既定は控えめ。超過分は翌日以降に自然と持ち越す。
-AUTO_EVAL_DAILY_LIMIT = _int_env("AUTO_EVAL_DAILY_LIMIT", 5)
+# 長い商談は30分ごとの区間に分けて解析するため、1件で5〜6回APIを呼ぶ。
+# 無料枠では1日に何件も回すと枠切れ(429)になるため、既定は2件に抑える。
+# 超過分は翌日以降へ自然に持ち越される（失敗した案件も翌日また拾う）。
+AUTO_EVAL_DAILY_LIMIT = _int_env("AUTO_EVAL_DAILY_LIMIT", 2)
 # カレンダーを何日さかのぼって初回商談を探すか（録画が出揃うまでの猶予）。
 AUTO_EVAL_LOOKBACK_DAYS = _int_env("AUTO_EVAL_LOOKBACK_DAYS", 14)
 # この日付(YYYY-MM-DD)より前の商談は自動評価しない（稼働開始前の過去分を一括評価しないため）。
