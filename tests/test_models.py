@@ -375,3 +375,35 @@ def test_unknown_score_keys_are_dropped():
     assert len(r.scores) == len(settings.EVALUATION_CRITERIA)
     assert r.overall_total == 25          # 満点を超えない
     assert r.score_for("natural_needs_発掘") is None
+
+
+def test_runaway_repetition_is_collapsed():
+    """AI がループして同じ語を繰り返した出力を、読める長さに畳む。
+
+    実際に before へ「もちろん」が数百回入り、画面が埋まる事故が起きた。
+    """
+    data = {"scores": [], "feedback": [{
+        "timestamp": "51:55",
+        "before": "もちろん" * 300,
+        "after": "かしこまりました。",
+        "customer_line": "一応外しても大丈夫ですか？",
+    }]}
+    f = EvaluationResult.from_dict(data).feedback[0]
+    assert f.before == "もちろんもちろん…"
+    assert f.after == "かしこまりました。"      # 正常な文は変わらない
+
+
+def test_short_natural_repeats_are_kept():
+    """「はいはい」のような自然な繰り返しは畳まない。"""
+    data = {"scores": [], "feedback": [
+        {"before": "はいはい、承知しました。ではご案内しますね。", "after": "x"}]}
+    got = EvaluationResult.from_dict(data).feedback[0].before
+    assert got == "はいはい、承知しました。ではご案内しますね。"
+
+
+def test_absurdly_long_utterance_is_cut():
+    """繰り返しでなくても、発言として長すぎるものは打ち切る。"""
+    data = {"scores": [], "feedback": [
+        {"before": "".join(chr(0x3042 + i % 80) for i in range(2000)), "after": "x"}]}
+    got = EvaluationResult.from_dict(data).feedback[0].before
+    assert len(got) <= 801 and got.endswith("…")

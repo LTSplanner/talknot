@@ -99,9 +99,35 @@ def _fix_terms(text: str) -> str:
     return text
 
 
+# 同じ短い語が延々と続くのを畳む。2〜20文字のかたまりが6回以上つながっていたら、
+# 2回＋省略記号にする。実際に before へ「もちろん」が数百回入る事故が起きた。
+_RUNAWAY_REPEAT = re.compile(r"(.{2,20}?)\1{5,}")
+
+# 1つの発言としてありえない長さ。ここを超えたら打ち切る（読めないうえ保存も圧迫する）。
+_MAX_UTTERANCE = 800
+
+
+def _collapse_repetition(text: str) -> str:
+    """生成が同じ語を繰り返し続けたときに、読める長さへ畳む。
+
+    AI がループに入り「もちろんもちろん…」が数百回続く出力が実際に出た。
+    そのまま出すと画面が埋まり、シートの1セル上限も圧迫する。
+    2回だけ残して「…」を付け、繰り返しだったことが分かるようにする。
+    """
+    if not text:
+        return text
+    collapsed = _RUNAWAY_REPEAT.sub(r"\1\1…", text)
+    if len(collapsed) > _MAX_UTTERANCE:
+        collapsed = collapsed[:_MAX_UTTERANCE] + "…"
+    return collapsed
+
+
 def _normalize_text(text: str) -> str:
-    """保存・表示前に文字列へかける共通の整形（ジョハリ用語＋業界用語の誤変換）。"""
-    return _fix_terms(_ja_johari(text))
+    """保存・表示前に文字列へかける共通の整形。
+
+    ジョハリ用語の日本語化、業界用語の誤変換、生成の繰り返しの畳み込み。
+    """
+    return _collapse_repetition(_fix_terms(_ja_johari(text)))
 
 
 # タイムスタンプの表記ゆれ（"MM:SS" / "HH:MM:SS" / ロープレの "T3"）を秒に直す。
