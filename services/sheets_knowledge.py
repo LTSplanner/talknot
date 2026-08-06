@@ -79,6 +79,40 @@ def _ensure_tab(svc, title: str, sheet_id: str | None = None) -> None:
 _EVAL_TAB = "Evaluations"
 _EVAL_HEADER = ["job_id", "user_email", "saved_at", "status", "label", "result_json", "error"]
 
+# スプレッドシートの1セルに入る上限は5万文字。超えると書き込み全体が 400 で失敗する。
+# 商談を区間に分けて解析するようになり、指摘が80件を超えるとこの上限に届く。
+_CELL_LIMIT = 50_000
+
+
+def _fit_cell(text: str) -> str:
+    """1セルに収まる長さに収める。入りきらない分は末尾の指摘から削る。
+
+    上限を超えると**シート全体の書き込みが失敗**し、他の人の記録まで巻き添えで
+    失われる（実際にロープレ17件が消えた）。そこで、書き込みが通ることを最優先に、
+    収まるまで削る。
+
+    削る順番は「隠れたニーズ → 場面の指摘」の**末尾から**。1ポイント・スコア・
+    振り返りは商談の要なので必ず残す。何件削ったかは _dropped に残す。
+    """
+    if not text or len(text) <= _CELL_LIMIT:
+        return text or ""
+
+    try:
+        data = json.loads(text)
+    except ValueError:
+        return text[:_CELL_LIMIT]
+
+    dropped = 0
+    for key in ("hidden_needs", "feedback"):
+        items = data.get(key)
+        while isinstance(items, list) and items and len(
+                json.dumps(data, ensure_ascii=False)) > _CELL_LIMIT:
+            items.pop()
+            dropped += 1
+    data["_dropped"] = dropped
+    out = json.dumps(data, ensure_ascii=False)
+    return out if len(out) <= _CELL_LIMIT else out[:_CELL_LIMIT]
+
 
 def _eval_sheet_id() -> str:
     return _cfg("EVALUATIONS_SHEET_ID") or _cfg("KNOWLEDGE_SHEET_ID")
@@ -116,13 +150,16 @@ def load_evaluations() -> list[dict]:
 
 
 def save_evaluations(items: list[dict]) -> None:
-    """Evaluations タブを全置換で書き戻す（タブが無ければ作る）。"""
+    """Evaluations タブを書き戻す（タブが無ければ作る）。
+
+    **先に書いてから、余った古い行だけを消す**。以前は「全消し→書き込み」の
+    順だったため、書き込みが失敗すると消えたままになり、実際にロープレの記録が
+    全件失われた（巨大な評価でセル上限に当たって 400 になったのが引き金）。
+    """
     svc = _service()
     sid = _eval_sheet_id()
     _ensure_tab(svc, _EVAL_TAB, sheet_id=sid)
-    svc.spreadsheets().values().clear(
-        spreadsheetId=sid, range=f"{_EVAL_TAB}!A:G"
-    ).execute()
+
     values = [_EVAL_HEADER] + [
         [
             it.get("job_id", ""),
@@ -130,17 +167,25 @@ def save_evaluations(items: list[dict]) -> None:
             it.get("saved_at", ""),
             it.get("status", "done"),
             it.get("label", ""),
-            it.get("result_json", ""),
+            _fit_cell(it.get("result_json", "")),
             it.get("error", ""),
         ]
         for it in items
     ]
+    # 1) まず上書きする（ここで失敗しても、既存の行は残る）
     svc.spreadsheets().values().update(
         spreadsheetId=sid,
         range=f"{_EVAL_TAB}!A1",
         valueInputOption="RAW",
         body={"values": values},
     ).execute()
+    # 2) 書けたあとで、はみ出した古い行だけを消す
+    try:
+        svc.spreadsheets().values().clear(
+            spreadsheetId=sid, range=f"{_EVAL_TAB}!A{len(values) + 1}:G"
+        ).execute()
+    except Exception:  # noqa: BLE001 消し残りは次回の書き込みで解消する
+        pass
 
 
 def load_reference() -> list[dict]:
