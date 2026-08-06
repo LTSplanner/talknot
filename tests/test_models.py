@@ -355,3 +355,23 @@ def test_hidden_needs_are_also_time_ordered():
     ]}
     got = [h.inferred_need for h in EvaluationResult.from_dict(data).hidden_needs]
     assert got == ["a", "b"]
+
+
+def test_unknown_score_keys_are_dropped():
+    """定義外の評価項目は合計に混ぜない。
+
+    AI が勝手なキー（natural_needs_発掘 など）を返し、6項目目として加算されて
+    合計 26/25 という上限超えが実際に起きた。画面にも出せないキーなので捨てる。
+    """
+    data = {"scores": [
+        {"key": "emotion_catch", "sales_score": 5},
+        {"key": "background_depth", "sales_score": 5},
+        {"key": "additional_consideration", "sales_score": 5},
+        {"key": "adaptability", "sales_score": 5},
+        {"key": "excitement", "sales_score": 5},
+        {"key": "natural_needs_発掘", "sales_score": 4},
+    ]}
+    r = EvaluationResult.from_dict(data)
+    assert len(r.scores) == len(settings.EVALUATION_CRITERIA)
+    assert r.overall_total == 25          # 満点を超えない
+    assert r.score_for("natural_needs_発掘") is None

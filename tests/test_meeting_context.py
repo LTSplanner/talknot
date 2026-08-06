@@ -180,3 +180,31 @@ def test_prompt_does_not_cap_the_number_of_findings():
     assert "3〜5件" not in p
     assert "0〜3件" not in p
     assert p.count("件数の上限なし") >= 2
+
+
+def test_prompt_splits_the_recording_into_three_segments():
+    """録画の長さを分単位で示し、区間ごとに件数を要求する。
+
+    「全体に散らして」と文章で頼むだけでは効かず、実測で場面の指摘が冒頭4分に
+    固まった（隠れたニーズは16分台まで出ていたのに）。区切りを数値で示す。
+    """
+    p = prompts.build_evaluation_prompt(duration_sec=17 * 60 + 20)
+    assert "この録画は **17:20** あります" in p
+    assert "序盤：00:00 〜 05:46" in p
+    assert "中盤：05:46 〜 11:33" in p
+    assert "終盤：11:33 〜 17:20" in p
+    assert "最低2件" in p
+
+
+def test_long_recordings_use_hours_in_the_segment_ranges():
+    """1時間を超える録画は HH:MM:SS で区間を示す。"""
+    p = prompts.build_evaluation_prompt(duration_sec=2 * 3600 + 30 * 60)
+    assert "この録画は **2:30:00** あります" in p
+    assert "序盤：00:00 〜 50:00" in p
+    assert "終盤：1:40:00 〜 2:30:00" in p
+
+
+def test_no_segment_block_without_a_duration():
+    """長さが取れなかったときは、この節を出さない（嘘の区間を示さない）。"""
+    assert "拾うべき時間帯" not in prompts.build_evaluation_prompt()
+    assert "拾うべき時間帯" not in prompts.build_evaluation_prompt(duration_sec=0)

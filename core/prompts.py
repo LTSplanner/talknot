@@ -65,6 +65,68 @@ def _meeting_context_block(context: dict | None) -> str:
 """
 
 
+def _hhmmss(seconds: float) -> str:
+    """秒を "MM:SS" / 1時間以上なら "HH:MM:SS" にする。"""
+    total = int(seconds)
+    h, rest = divmod(total, 3600)
+    m, s = divmod(rest, 60)
+    return f"{h}:{m:02d}:{s:02d}" if h else f"{m:02d}:{s:02d}"
+
+
+def _segment_block(segment: tuple[float, float, float | None]) -> str:
+    """いま渡しているのが録画の一部だと伝える節。
+
+    長い商談は区間に切って解析する。区間だけ見せると「商談の冒頭から」と
+    勘違いして挨拶の指摘ばかり出すので、全体のどこを見ているかを明示する。
+    タイムスタンプは**この区間の先頭を 00:00 とした経過時間**で書かせ、
+    全体の位置への直しは呼び出し側（core.chunking）で行う。
+    """
+    start, end, total = segment
+    whole = f"（全体は {_hhmmss(total)}）" if total else ""
+    return f"""
+# 【重要】これは商談の一部です
+渡した映像は、商談全体のうち **{_hhmmss(start)} 〜 {_hhmmss(end)}** の区間です{whole}。
+- ここが商談の冒頭とは限りません。**挨拶や自己紹介が無くても不自然ではありません**。
+- タイムスタンプは、**この映像の先頭を 00:00 とした経過時間**で書いてください
+  （全体での位置には、こちらで直します）。
+- この区間の中で、直す価値のある場面を**最初から最後まで**拾ってください。
+- スコアは、この区間で見えた範囲で付けてください。
+"""
+
+
+def _coverage_block(duration_sec: float | None) -> str:
+    """録画の長さを伝え、時間帯ごとに最低件数を課す。
+
+    「全体に散らして」と文章で頼むだけでは効かなかった（実測：隠れたニーズは
+    16:39 まで出ているのに、場面の指摘は 00:00〜03:52 の冒頭4分に固まった）。
+    モデルは冒頭から順に拾って途中でやめる癖があるため、**実際の区切りを分単位で
+    示して、区間ごとに件数を要求する**という機械的な形に変える。
+    """
+    if not duration_sec or duration_sec <= 0:
+        return ""
+
+    third = duration_sec / 3
+    segments = [
+        ("序盤", 0.0, third),
+        ("中盤", third, third * 2),
+        ("終盤", third * 2, duration_sec),
+    ]
+    rows = "\n".join(
+        f"- {name}：{_hhmmss(start)} 〜 {_hhmmss(end)}　→ ここから**最低2件**"
+        for name, start, end in segments
+    )
+    return f"""
+# この録画の長さと、拾うべき時間帯（厳守）
+この録画は **{_hhmmss(duration_sec)}** あります。3つに区切るので、**どの区間からも**
+feedback を挙げてください。冒頭だけで打ち切ることは認めません。
+{rows}
+★書き終えたら、feedback のタイムスタンプを並べて、**3区間すべてに入っているか**を
+  数えて確認してください。足りない区間があれば、そこを見直して追加します。
+★とくに終盤（金額・見積・次の約束）は受注に直結します。必ず含めてください。
+★{_hhmmss(duration_sec)} を超えるタイムスタンプは書かないでください（存在しない場面です）。
+"""
+
+
 def _glossary_block() -> str:
     """弊社の業界用語集。音声認識の同音誤変換をこの表記へ寄せさせる。"""
     lines = "\n".join(
@@ -185,6 +247,8 @@ def build_evaluation_prompt(
     knowledge_base: str | None = None,
     meeting_context: dict | None = None,
     previous_one_point: dict | None = None,
+    duration_sec: float | None = None,
+    segment: tuple[float, float, float | None] | None = None,
 ) -> str:
     criteria_keys = " / ".join(c.key for c in settings.EVALUATION_CRITERIA)
     criteria_lines = "\n".join(
@@ -202,11 +266,14 @@ def build_evaluation_prompt(
     )
     context_block = _meeting_context_block(meeting_context)
     previous_block = _previous_block(previous_one_point)
+    # 区間解析のときは『一部である』ことを伝え、区間内の網羅を求める。
+    coverage_block = (_segment_block(segment) if segment
+                      else _coverage_block(duration_sec))
     return f"""{settings.SALES_AI_PERSONA}
 
 ★出力する文章はすべて日本語で書いてください（scores のコメント、hidden_needs の
 signal・inferred_need・note、feedback、summary を含め、英語を混ぜない）。
-{context_block}{previous_block}{_glossary_block()}
+{context_block}{coverage_block}{previous_block}{_glossary_block()}
 
 動画（または音声）から、文字面だけでなく「声のトーン」「間」「発話比率」、さらに
 言い淀み・沈黙・話題の回避・過剰な同意・即答できない様子・声の小ささなどの

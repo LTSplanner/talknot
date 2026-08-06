@@ -10,13 +10,14 @@ import json
 import os
 import re
 import subprocess
+import tempfile
 import time
 
 from google import genai
 from google.genai import types
 
 from config import settings
-from core import prompts
+from core import chunking, prompts
 from core.meeting_context import fill_customer_placeholders
 from core.models import EvaluationResult
 
@@ -223,6 +224,79 @@ def _media_part(uploaded, fps: float | None = None):
     return uploaded
 
 
+def _cut_segment(src: str, start_sec: int, length_sec: int) -> str:
+    """録画の一部を切り出して一時ファイルに書き、そのパスを返す。
+
+    再エンコードせず（-c copy）にコピーするので速い。キーフレーム単位で
+    数秒ずれることがあるが、評価に使うタイムスタンプの精度としては十分。
+    """
+    import imageio_ffmpeg
+
+    ff = imageio_ffmpeg.get_ffmpeg_exe()
+    fd, out = tempfile.mkstemp(suffix=".mp4")
+    os.close(fd)
+    subprocess.run(
+        [ff, "-y", "-ss", str(start_sec), "-i", src, "-t", str(length_sec),
+         "-c", "copy", "-loglevel", "error", out],
+        check=True, capture_output=True, timeout=1800,
+    )
+    return out
+
+
+_SYNTHESIS_PROMPT = (
+    "あなたは住宅営業のコーチです。ある商談を時間帯ごとに分けて分析した結果を渡します。\n"
+    "**商談全体を1つとして見て**、次の3つだけを日本語の JSON で返してください。\n"
+    "前後に説明文やコードフェンスを付けないこと。\n\n"
+    "{\n"
+    '  "one_point": {"headline": "<次に直す1点。行動で20字程度>", "timestamp": "<代表的な場面>",\n'
+    '    "reason": "<なぜそこか＋その結果どうなったか。100字以内>",\n'
+    '    "action": "<次回そのままお客様に言えるセリフ。「」で囲む。80字以内。自分への指示にしない>",\n'
+    '    "keep": "<続けてほしい良かった点を1つ。60字以内>"},\n'
+    '  "summary": "<全体の振り返り。150字以内。良かった点1つ＋次の重点1つ>",\n'
+    '  "customer_profile": {"attributes": ["<特徴タグ1〜4個>"], "summary": "<人物像を2〜3文>",\n'
+    '    "next_approach": "<次回どう提案すると響くか>"}\n'
+    "}\n\n"
+    "★one_point は**商談全体で最も受注に効いた欠け**を1つだけ選びます。"
+    "特定の時間帯だけを見て決めないでください。\n"
+)
+
+
+def _synthesize_overall(client, merged: dict, duration_sec: float | None) -> dict:
+    """区間ごとの結果をまとめて、商談全体としての1ポイント・振り返りを決める。
+
+    区間の結果をそのまま寄せ集めると「冒頭の区間の1ポイント」が採用されてしまい、
+    商談全体を見た指摘にならない。動画は渡さず、テキストだけで安く決め直す。
+    """
+    scenes = [
+        f"- {f.get('timestamp', '')} {f.get('customer_line', '')[:60]}"
+        f" → 営業「{f.get('before', '')[:60]}」／改善案「{f.get('after', '')[:60]}」"
+        for f in (merged.get("feedback") or [])[:40]
+    ]
+    needs = [
+        f"- {h.get('timestamp', '')} {h.get('inferred_need', '')[:60]}"
+        f"（{'踏み込めた' if h.get('surfaced') else '取りこぼし'}）"
+        for h in (merged.get("hidden_needs") or [])[:30]
+    ]
+    scores = "／".join(
+        f"{s.get('key')}={s.get('sales_score')}" for s in (merged.get("scores") or []))
+    length = f"約{int((duration_sec or 0) // 60)}分" if duration_sec else "不明"
+
+    text = (
+        f"{_SYNTHESIS_PROMPT}\n"
+        f"# 商談の長さ\n{length}\n\n"
+        f"# 項目別スコア（5点満点）\n{scores}\n\n"
+        f"# 時系列の場面（Before→After）\n" + "\n".join(scenes) + "\n\n"
+        f"# 読み取った隠れたニーズ\n" + "\n".join(needs)
+    )
+    cfg = types.GenerateContentConfig(
+        response_mime_type="application/json",
+        max_output_tokens=8192,
+        thinking_config=types.ThinkingConfig(thinking_budget=_THINKING_BUDGET),
+    )
+    resp = _generate_retrying(client, [text], cfg)
+    return _loads_lenient(resp.text, repair=True)
+
+
 def analyze(
     video_path: str,
     reference_talk: str | None = None,
@@ -241,14 +315,65 @@ def analyze(
     """
     client = _client()
 
-    # 映像は残す（表情など非言語も評価に使う）。長尺は動画の長さから fps を自動計算して
-    # フレームを間引き、表情の変化は追えるままトークン（＝無料枠）消費を抑える。
+    duration = _probe_duration_sec(video_path)
+    chunks = chunking.plan_chunks(duration or 0)
+
+    # 45分を超える録画は区間に分けて解析する。丸ごと渡すと後半がほとんど
+    # 読まれず、3時間の商談で冒頭5分ぶんの指摘しか返らなかったため。
+    if len(chunks) <= 1:
+        data = _analyze_one(
+            client, video_path, reference_talk, knowledge_base,
+            meeting_context, previous_one_point, duration)
+    else:
+        parts = []
+        for i, (start, end) in enumerate(chunks, 1):
+            print(f"    区間 {i}/{len(chunks)}: "
+                  f"{chunking.format_timestamp(start)}〜{chunking.format_timestamp(end)}",
+                  flush=True)
+            piece = _cut_segment(video_path, start, end - start)
+            try:
+                part = _analyze_one(
+                    client, piece, reference_talk, knowledge_base,
+                    meeting_context, previous_one_point, end - start,
+                    segment=(start, end, duration))
+                # 区間内の経過時間で返るので、録画全体での位置に直す。
+                parts.append(chunking.shift_timestamps(part, start))
+            except Exception as e:  # noqa: BLE001 1区間の失敗で全体を捨てない
+                print(f"    区間 {i} の解析に失敗（この区間は飛ばします）: {str(e)[:120]}",
+                      flush=True)
+            finally:
+                try:
+                    os.remove(piece)
+                except OSError:
+                    pass
+
+        if not parts:
+            raise RuntimeError("すべての区間で解析に失敗しました。")
+        data = chunking.merge_results(parts)
+        # 1ポイント・振り返り・攻略メモは、区間の寄せ集めにせず全体で決め直す。
+        try:
+            data.update(_synthesize_overall(client, data, duration))
+        except Exception as e:  # noqa: BLE001 まとめに失敗しても区間の結果は返す
+            print(f"    全体のまとめに失敗（区間の結果のみ返します）: {str(e)[:120]}",
+                  flush=True)
+
+    # 「〇〇様」のまま出たセリフを実名に直す（そのまま口に出せることが価値なので）。
+    data = fill_customer_placeholders(data, (meeting_context or {}).get("customer_name", ""))
+    return EvaluationResult.from_dict(data)
+
+
+def _analyze_one(
+    client, video_path: str, reference_talk, knowledge_base,
+    meeting_context, previous_one_point, duration, segment=None,
+) -> dict:
+    """動画1本（または1区間）を解析して、生の JSON を返す。"""
     fps = _target_fps(video_path)
     uploaded = client.files.upload(file=video_path)
     uploaded = _wait_until_active(client, uploaded)
 
     prompt = prompts.build_evaluation_prompt(
-        reference_talk, knowledge_base, meeting_context, previous_one_point)
+        reference_talk, knowledge_base, meeting_context, previous_one_point,
+        duration, segment)
 
     cfg = types.GenerateContentConfig(
         response_mime_type="application/json",
@@ -259,23 +384,18 @@ def analyze(
     )
     try:
         resp = _generate_retrying(client, [_media_part(uploaded, fps), prompt], cfg)
-        data = _loads_lenient(resp.text)
+        return _loads_lenient(resp.text)
     except json.JSONDecodeError:
         # 途中切断/不正JSONのことがあるため、JSON厳守を促して1回だけ再試行する。
         # それでも切れていたら、読めたところまでを救済して評価を出す。
         resp = _generate_retrying(
             client, [_media_part(uploaded, fps), prompt + _STRICT_JSON], cfg)
-        data = _loads_lenient(resp.text, repair=True)
+        return _loads_lenient(resp.text, repair=True)
     finally:
-        # 解析後はアップロード済みファイルを後始末（失敗しても致命的ではない）
         try:
             client.files.delete(name=uploaded.name)
         except Exception:
             pass
-
-    # 「〇〇様」のまま出たセリフを実名に直す（そのまま口に出せることが価値なので）。
-    data = fill_customer_placeholders(data, (meeting_context or {}).get("customer_name", ""))
-    return EvaluationResult.from_dict(data)
 
 
 def analyze_roleplay(

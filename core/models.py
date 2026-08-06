@@ -437,8 +437,12 @@ class EvaluationResult:
                 comment=fu.get("comment") or "",
             )
 
+        # 定義外の評価項目キーは捨てる。AI が勝手なキー（例 natural_needs_発掘）を
+        # 返すことがあり、そのまま数えると6項目目として合計に乗り、26/25 のような
+        # 上限を超えた点数になってしまう。画面にも表示できないキーなので落とす。
         return cls(
-            scores=[cls._parse_score(s) for s in data.get("scores", [])],
+            scores=[cls._parse_score(s) for s in data.get("scores", [])
+                    if s.get("key") in settings.CRITERIA_BY_KEY],
             johari=johari,
             # 既定では制限しない（settings.MAX_HIDDEN_NEEDS <= 0）。
             # 上限を設けると商談の前半だけで打ち切られ、全体を読まなくなるため。
