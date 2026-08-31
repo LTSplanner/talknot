@@ -114,3 +114,26 @@ def test_message_includes_the_streak():
 def test_message_without_streak_has_no_extra_line():
     text = _message_for(ALICE, {ALICE: "森谷淳美"}, "2026-08-04", streak=0)
     assert "つづけて達成" not in text
+
+
+def test_company_holiday_stops_everyone():
+    """会社の休業日は全員に送らない（カレンダーへの入れ忘れの保険）。"""
+    from config import settings
+
+    assert not settings.is_company_holiday("2026-09-01")
+    assert not settings.is_company_holiday("")
+
+
+def test_day_off_is_decided_per_person_not_by_weekday():
+    """シフト制なので、休みは曜日ではなく各自のカレンダーで判定する。"""
+    from core import reminders
+
+    # 「中谷OFF 09:00〜22:00」のように時間指定で入っていても休みとみなす
+    assert reminders.is_off_today([{"title": "中谷OFF 09:00〜22:00"}])
+    assert reminders.is_off_today([{"title": "有給"}])
+    assert reminders.is_off_today([{"title": "夏季休暇"}])
+    # 半休は稼働扱い（送る）
+    assert not reminders.is_off_today([{"title": "午前休"}])
+    # 予定なし＝稼働（土日でも送る）
+    assert not reminders.is_off_today([])
+    assert not reminders.is_off_today([{"title": "事務DAY"}])

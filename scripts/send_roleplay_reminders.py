@@ -1,4 +1,8 @@
-"""当日ロープレ未実施の対象者へ、前向きなリマインドを送る（平日15:00・JST）。
+"""当日ロープレ未実施の対象者へ、前向きなリマインドを送る（毎日15:00前後・JST）。
+
+送る/送らないは曜日では決めない。プランナーはシフト制で土日も稼働するため、
+**各自のカレンダーに入った「OFF」「休み」等の予定**で個人ごとに判定する
+（core.reminders.is_off_today）。半休の日は稼働扱いで送る。
 
 流れ:
   1. sheets_knowledge.load_evaluations() で評価レコードを読む。
@@ -6,6 +10,7 @@
   3. services.google_chat.notify() で各人へDM（またはWebhookでまとめ投稿）。
 
 方針:
+  - 会社の休業日（settings.COMPANY_HOLIDAYS）は全員に送らない。
   - 送信設定（Chat）や履歴設定（Knowledgeシート）が無い場合は送らず、
     警告を出して exit 0（CI/Actions を赤くしない）。
   - --dry-run では送信せず、対象と本文を表示するだけ。
@@ -281,6 +286,11 @@ def main() -> int:
     today = reminders.today_jst_str()
     targets = settings.TARGET_ACCOUNTS
     print(f"基準日(JST): {today} / 対象 {len(targets)} 名")
+
+    # 会社の休業日は全員に送らない（各自のカレンダーへの入れ忘れに対する保険）。
+    if settings.is_company_holiday(today):
+        print("会社の休業日（COMPANY_HOLIDAYS）のため、リマインドを送らず終了。")
+        return 0
 
     # 履歴（評価レコード）の設定が無ければ、当日実施の判定ができないためスキップ。
     if not sheets_knowledge.configured():

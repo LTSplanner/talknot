@@ -58,6 +58,18 @@ VIEWER_EMAILS = _csv_env(
     ),
 )
 
+# 会社としての休業日（YYYY-MM-DD をカンマ区切り）。この日はロープレの
+# リマインドを一切送らない。各自のカレンダーに休みが入っていれば自動で
+# 止まるが、入れ忘れても全員に送らないための保険として使う。
+# 例: COMPANY_HOLIDAYS=2026-12-30,2026-12-31,2027-01-01
+COMPANY_HOLIDAYS = _csv_env("COMPANY_HOLIDAYS")
+
+
+def is_company_holiday(date_str: str) -> bool:
+    """会社の休業日か（YYYY-MM-DD）。リマインドを止めるのに使う。"""
+    return bool(date_str) and date_str in set(COMPANY_HOLIDAYS)
+
+
 # 評価がエラーになったとき、Google Chat の個人DMで通知する宛先（空なら通知しない）。
 # 送信には Chat の設定（CHAT_SA_JSON 等）がアプリ側にも必要。未設定なら静かにスキップ。
 ERROR_NOTIFY_EMAIL = os.getenv("ERROR_NOTIFY_EMAIL", "hkumada@life-time-support.com")
