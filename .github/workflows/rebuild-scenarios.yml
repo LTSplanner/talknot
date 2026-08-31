@@ -1,0 +1,47 @@
+name: rebuild-scenarios
+
+# ロープレの単元（台本）を、模範トークスクリプトから作り直してシートに保存する。
+# 商品説明を直したとき（例：ダウンライトの施工内容）に、手動で1回まわす。
+#
+# 手順：GitHub の Actions タブ → rebuild-scenarios → Run workflow
+#   dry_run = true （既定）… 何が作られるかを表示するだけ。保存しない。
+#   dry_run = false        … 実際にシートへ保存する（全プランナーの画面が変わる）。
+#
+# 管理者が画面で直したセリフ・カンペ（overrides）は別に保存されているので、
+# 作り直しても消えない。
+#
+# 必要な GitHub Secrets（リマインドの定期実行と同じもの）:
+#   KNOWLEDGE_SHEET_ID … 台本を保存するスプレッドシートのID
+#   KNOWLEDGE_SA_JSON  … そのシートを書ける知識SAの鍵JSON
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "true なら保存せず内容の確認だけ"
+        type: boolean
+        default: true
+
+jobs:
+  rebuild:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Rebuild roleplay scenarios
+        env:
+          PYTHONPATH: .
+          PYTHONUNBUFFERED: "1"
+          KNOWLEDGE_SHEET_ID: ${{ secrets.KNOWLEDGE_SHEET_ID }}
+          KNOWLEDGE_SA_JSON: ${{ secrets.KNOWLEDGE_SA_JSON }}
+        run: |
+          python scripts/build_roleplay_scenarios.py \
+            ${{ inputs.dry_run && '--dry-run' || '' }}
