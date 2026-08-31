@@ -229,9 +229,14 @@ def is_allowed_domain(email: str | None) -> bool:
 # 応用①「反論・切り返しドリル」。基礎（導入・重点3商材）が身につくまで非表示にする。
 FEATURE_OBJECTION_DRILL = _bool_env("FEATURE_OBJECTION_DRILL", True)
 
+# 応用②「ご意見箱」。プランナーからの要望・不具合を集めて共有シートに残す。
+# まず先行公開の対象者に見てもらい、問題なければ True にして全員へ。
+FEATURE_FEEDBACK_BOX = _bool_env("FEATURE_FEEDBACK_BOX", False)
+
 # 機能名 → フラグ値の対応表（未知の名前は False）。
 _FEATURE_FLAGS = {
     "objection_drill": FEATURE_OBJECTION_DRILL,
+    "feedback_box": FEATURE_FEEDBACK_BOX,
 }
 
 

@@ -516,3 +516,8 @@ def sidebar(user: dict) -> None:
             persist.clear()  # 保存したログインCookieも消す
             session.logout()
             st.rerun()
+
+
+def feedback_kind_options() -> list[str]:
+    """ご意見箱の種別。迷わず選べるよう少数に絞る。"""
+    return ["🛠 こう直してほしい", "🐛 うまく動かない", "💡 こんな機能がほしい", "💬 その他"]

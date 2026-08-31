@@ -37,7 +37,10 @@ from config import settings  # noqa: E402
 from core import meeting_context  # noqa: E402
 from core.progress import hide_resolved_errors, latest_one_point  # noqa: E402
 from core.models import EvaluationResult  # noqa: E402
-from services import drive_sa, gemini_analyzer, google_drive, storage, usage_log  # noqa: E402
+from services import (  # noqa: E402
+    drive_sa, gemini_analyzer, google_chat, google_drive, sheets_knowledge,
+    storage, usage_log,
+)
 from ui import components, theme  # noqa: E402
 
 # タブに出るアイコン。ロゴ全文字は16pxで潰れるため、特徴的な「Li」だけを
@@ -1553,6 +1556,58 @@ def render_badges_tab(user: dict) -> None:
     components.badge_collection(badges.evaluate(records), who_label)
 
 
+def render_feedback_tab(user: dict) -> None:
+    """ご意見箱：要望・不具合をプランナーから集め、共有シートに残す。
+
+    投稿は Feedback タブに1行ずつ追記されるので、ホストはシートを直接開いて
+    対応状況を書き込める。管理者はこの画面でも一覧を見られる。
+    """
+    st.markdown("#### 💬 ご意見箱")
+    st.caption(
+        "KNOTE を使っていて気づいたこと、直してほしいところ、あったら嬉しい機能を"
+        "教えてください。短くて大丈夫です。いただいた内容はすべて確認します。"
+    )
+
+    with st.form("feedback_form", clear_on_submit=True):
+        kind = st.radio("種別", components.feedback_kind_options(), horizontal=True)
+        body = st.text_area(
+            "内容", height=140,
+            placeholder="例）評価の『次の一言』が長いときがあります。もう少し短いと助かります。",
+        )
+        submitted = st.form_submit_button("送信する", use_container_width=True)
+
+    if submitted:
+        if not body.strip():
+            st.warning("内容を入力してください。")
+        else:
+            try:
+                sheets_knowledge.append_feedback(
+                    user.get("email", ""), kind, body.strip())
+                st.success("送信しました。ありがとうございます！")
+                # ホストにも知らせる（失敗しても投稿は残っているので止めない）。
+                try:
+                    google_chat.notify_admin(
+                        settings.ERROR_NOTIFY_EMAIL,
+                        f"💬 KNOTE ご意見箱に投稿がありました\n"
+                        f"{user.get('name', '')}（{kind}）\n{body.strip()[:200]}")
+                except Exception:  # noqa: BLE001 通知は任意
+                    pass
+            except Exception as e:  # noqa: BLE001 保存できないことは伝える
+                st.error(f"送信できませんでした：{str(e)[:150]}")
+
+    if settings.can_view_all(user.get("email")):
+        st.divider()
+        items = sheets_knowledge.load_feedback()
+        st.markdown(f"##### 📥 届いているご意見（{len(items)} 件）")
+        if not items:
+            st.caption("まだ投稿はありません。")
+        for it in items:
+            head = f"{it['status']}　{it['sent_at'][:16]}　{it['sender'].split('@')[0]}"
+            with st.expander(f"{head}　{it['kind']}"):
+                st.write(it["body"])
+        st.caption("対応状況の更新は、共有スプレッドシートの Feedback タブで行えます。")
+
+
 def render_knowledge_tab(user: dict) -> None:
     st.markdown("##### 弊社ナレッジ（AIが前提にする社内知識）")
     st.write(
@@ -1830,10 +1885,14 @@ def render_app(user: dict) -> None:
     components.hero(compact=True)
     _render_roleplay_nudge(user)
 
-    evaluate, roleplay, badges_tab, reference, knowledge, history, about = st.tabs(
-        ["🎥 商談を評価する", "🎙️ 1人ロープレ", "🏅 称号バッジ", "⭐ 模範トーク",
-         "🧠 弊社ナレッジ", "🕘 評価履歴", "📊 評価項目について"]
-    )
+    # ご意見箱はフラグOFFのあいだ、先行公開の対象者と管理者にだけ見せる。
+    show_feedback = settings.feature_visible("feedback_box", user.get("email"))
+    labels = ["🎥 商談を評価する", "🎙️ 1人ロープレ", "🏅 称号バッジ", "⭐ 模範トーク",
+              "🧠 弊社ナレッジ", "🕘 評価履歴", "📊 評価項目について"]
+    if show_feedback:
+        labels.append("💬 ご意見箱")
+    tabs = st.tabs(labels)
+    evaluate, roleplay, badges_tab, reference, knowledge, history, about = tabs[:7]
     with evaluate:
         render_evaluate_tab(user)
     with roleplay:
@@ -1849,6 +1908,9 @@ def render_app(user: dict) -> None:
     with about:
         st.markdown("##### KNOTE が見る 5 つの視点")
         components.criteria_overview()
+    if show_feedback:
+        with tabs[7]:
+            render_feedback_tab(user)
 
 
 def main() -> None:

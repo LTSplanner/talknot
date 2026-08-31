@@ -124,6 +124,55 @@ def append_reminder_log(date_str: str, emails: list[str]) -> None:
     ).execute()
 
 
+# プランナーからの要望・不具合報告。ホストはこのタブを直接見て対応できる。
+_FEEDBACK_TAB = "Feedback"
+_FEEDBACK_HEADER = ["送信日時", "送信者", "種別", "内容", "対応状況"]
+
+
+def append_feedback(sender: str, kind: str, body: str) -> None:
+    """ご意見箱の投稿を1行追記する（追記のみ・既存行は触らない）。"""
+    svc = _service()
+    sid = _eval_sheet_id()
+    _ensure_tab(svc, _FEEDBACK_TAB, sheet_id=sid)
+    # 見出し行が無ければ先に入れる（人が直接開いて読めるように）。
+    try:
+        head = svc.spreadsheets().values().get(
+            spreadsheetId=sid, range=f"{_FEEDBACK_TAB}!A1:E1").execute()
+        if not head.get("values"):
+            svc.spreadsheets().values().update(
+                spreadsheetId=sid, range=f"{_FEEDBACK_TAB}!A1",
+                valueInputOption="RAW", body={"values": [_FEEDBACK_HEADER]}).execute()
+    except Exception:  # noqa: BLE001 見出しが入らなくても投稿は残す
+        pass
+    svc.spreadsheets().values().append(
+        spreadsheetId=sid,
+        range=f"{_FEEDBACK_TAB}!A:E",
+        valueInputOption="RAW",
+        insertDataOption="INSERT_ROWS",
+        body={"values": [[_now_str(), sender, kind, body, "未対応"]]},
+    ).execute()
+
+
+def load_feedback() -> list[dict]:
+    """ご意見箱の投稿を新しい順で返す。読めなければ空。"""
+    try:
+        svc = _service()
+        resp = svc.spreadsheets().values().get(
+            spreadsheetId=_eval_sheet_id(), range=f"{_FEEDBACK_TAB}!A2:E").execute()
+    except Exception:  # noqa: BLE001 タブが無い初回など
+        return []
+    out = []
+    for row in resp.get("values", []):
+        def c(i):
+            return (row[i] if len(row) > i else "").strip()
+        if not c(3):          # 内容が空の行は飛ばす
+            continue
+        out.append({"sent_at": c(0), "sender": c(1), "kind": c(2),
+                    "body": c(3), "status": c(4) or "未対応"})
+    out.sort(key=lambda r: r["sent_at"], reverse=True)
+    return out
+
+
 _EVAL_TAB = "Evaluations"
 _EVAL_HEADER = ["job_id", "user_email", "saved_at", "status", "label", "result_json", "error"]
 
