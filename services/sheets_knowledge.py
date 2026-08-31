@@ -21,6 +21,13 @@ from config import settings
 _HEADER = ["category", "point", "added_at"]
 
 
+def _now_str() -> str:
+    """記録用の現在時刻（JST）。"""
+    import datetime as _dt
+    return _dt.datetime.now(
+        _dt.timezone(_dt.timedelta(hours=9))).strftime('%Y-%m-%d %H:%M:%S')
+
+
 def _cfg(name: str) -> str:
     """settings から安全に取得（再デプロイ移行期に属性が無くても落ちないように）。"""
     return getattr(settings, name, "") or ""
@@ -76,6 +83,47 @@ def _ensure_tab(svc, title: str, sheet_id: str | None = None) -> None:
 # --------------------------------------------------------------------------- #
 # 評価履歴（各自のみ閲覧。アプリ側で user_email により絞り込む）
 # --------------------------------------------------------------------------- #
+# その日リマインドを送った相手の記録。定期実行を1時間ごとに回すため、
+# 同じ日に二重で送らないための目印として使う（date + user_email）。
+_REMIND_TAB = "ReminderLog"
+
+
+def load_reminder_log(date_str: str) -> set[str]:
+    """その日すでにリマインドを送った相手（メール）の集合を返す。
+
+    読めなければ空集合。ここで失敗しても送信は止めない（届かないより二重の方がまし）。
+    """
+    try:
+        svc = _service()
+        resp = (
+            svc.spreadsheets().values()
+            .get(spreadsheetId=_eval_sheet_id(), range=f"{_REMIND_TAB}!A2:B")
+            .execute()
+        )
+    except Exception:  # noqa: BLE001 タブが無い初回など
+        return set()
+    return {
+        row[1].strip() for row in resp.get("values", [])
+        if len(row) > 1 and row[0].strip() == date_str and row[1].strip()
+    }
+
+
+def append_reminder_log(date_str: str, emails: list[str]) -> None:
+    """送った相手を追記する（古い行は消さない・追記のみで安全）。"""
+    if not emails:
+        return
+    svc = _service()
+    sid = _eval_sheet_id()
+    _ensure_tab(svc, _REMIND_TAB, sheet_id=sid)
+    svc.spreadsheets().values().append(
+        spreadsheetId=sid,
+        range=f"{_REMIND_TAB}!A:C",
+        valueInputOption="RAW",
+        insertDataOption="INSERT_ROWS",
+        body={"values": [[date_str, e, _now_str()] for e in emails]},
+    ).execute()
+
+
 _EVAL_TAB = "Evaluations"
 _EVAL_HEADER = ["job_id", "user_email", "saved_at", "status", "label", "result_json", "error"]
 

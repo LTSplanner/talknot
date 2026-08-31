@@ -37,6 +37,31 @@ HALFDAY_KEYWORDS: tuple[str, ...] = (
 )
 
 
+# リマインドを送ってよい時間帯（JST）。プランナーの就業時間内に収める。
+# GitHub の定期実行は遅延が読めず、12:40指定の実行が翌0:38に走って
+# 深夜にDMが届く事故が起きた。時刻の担保は cron ではなくコード側で行う。
+SEND_WINDOW_START_HOUR = 14
+SEND_WINDOW_END_HOUR = 17
+
+
+def is_within_send_window(
+    now: _dt.datetime | None = None,
+    *,
+    start_hour: int = SEND_WINDOW_START_HOUR,
+    end_hour: int = SEND_WINDOW_END_HOUR,
+) -> bool:
+    """いまリマインドを送ってよい時間帯か（JST の 14:00〜17:00 未満）。
+
+    定期実行がいつ起動しても、この判定を通らなければ送らない。
+    17:00ちょうどは送らない（終業間際の催促を避ける）。
+    """
+    base = now or _dt.datetime.now(JST)
+    if base.tzinfo is None:
+        base = base.replace(tzinfo=JST)
+    hour = base.astimezone(JST).hour
+    return start_hour <= hour < end_hour
+
+
 def today_jst_str(now: _dt.datetime | None = None) -> str:
     """JST での「今日」を "YYYY-MM-DD" で返す。
 

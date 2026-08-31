@@ -292,6 +292,14 @@ def main() -> int:
         print("会社の休業日（COMPANY_HOLIDAYS）のため、リマインドを送らず終了。")
         return 0
 
+    # 深夜に届く事故を防ぐ門番。GitHub の定期実行は遅延が読めず、12:40指定の
+    # 実行が翌0:38に走って深夜にDMが飛んだ。時刻は cron ではなくここで担保する。
+    if not args.dry_run and not reminders.is_within_send_window():
+        now = _dt.datetime.now(reminders.JST).strftime("%H:%M")
+        print(f"送信できる時間帯（JST {reminders.SEND_WINDOW_START_HOUR}:00〜"
+              f"{reminders.SEND_WINDOW_END_HOUR}:00）の外（現在 {now}）。送らず終了。")
+        return 0
+
     # 履歴（評価レコード）の設定が無ければ、当日実施の判定ができないためスキップ。
     if not sheets_knowledge.configured():
         print("評価履歴シートが未設定（KNOWLEDGE_SHEET_ID / KNOWLEDGE_SA）。送信せず終了。")
@@ -321,6 +329,19 @@ def main() -> int:
             print(f"うち休みでスキップ: {len(dayoff)} 名 / 実際に送る: {len(missed)} 名")
             for email in dayoff:
                 print(f"  休みスキップ: {email}")
+
+    # 1時間ごとに実行するので、その日すでに送った人は除く（二重送信の防止）。
+    if not args.dry_run:
+        try:
+            already = sheets_knowledge.load_reminder_log(today)
+        except Exception as e:  # noqa: BLE001 読めなければ送る側に倒す
+            print(f"送信済みの記録を読めませんでした（そのまま送ります）: {str(e)[:100]}")
+            already = set()
+        if already:
+            skipped = [e for e in missed if e in already]
+            missed = [e for e in missed if e not in already]
+            if skipped:
+                print(f"本日すでに送信済みのためスキップ: {len(skipped)} 名")
 
     if not missed:
         print("送る対象なし。リマインド不要。")
@@ -354,7 +375,13 @@ def main() -> int:
     if result.get("skipped"):
         print("送信経路なしのためスキップ。")
         return 0
-    print(f"送信モード: {result.get('mode')} / 成功 {len(result.get('sent', []))} 件 "
+    sent = result.get("sent", [])
+    # 送れた相手を記録しておき、同じ日の次の実行では送らない。
+    try:
+        sheets_knowledge.append_reminder_log(today, sent)
+    except Exception as e:  # noqa: BLE001 記録できなくても送信自体は成功している
+        print(f"送信済みの記録に失敗（次の実行で重複する可能性）: {str(e)[:100]}")
+    print(f"送信モード: {result.get('mode')} / 成功 {len(sent)} 件 "
           f"/ 失敗 {len(result.get('failed', []))} 件")
     for email, err in result.get("failed", []):
         print(f"  失敗: {email}: {err}")

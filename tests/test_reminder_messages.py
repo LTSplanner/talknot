@@ -137,3 +137,55 @@ def test_day_off_is_decided_per_person_not_by_weekday():
     # 予定なし＝稼働（土日でも送る）
     assert not reminders.is_off_today([])
     assert not reminders.is_off_today([{"title": "事務DAY"}])
+
+
+class TestSendWindow:
+    """深夜に届かないための門番。実際に 0:37・0:38 にDMが飛ぶ事故が起きた。
+
+    GitHub の定期実行は遅延が読めない（12:40指定が翌0:38に起動した）ため、
+    時刻は cron ではなくコード側で担保する。
+    """
+
+    def _at(self, hour, minute=30):
+        import datetime as dt
+
+        from core.reminders import JST
+        return dt.datetime(2026, 8, 29, hour, minute, tzinfo=JST)
+
+    def test_midnight_is_blocked(self):
+        from core import reminders
+        assert not reminders.is_within_send_window(self._at(0, 37))
+        assert not reminders.is_within_send_window(self._at(0, 38))
+        assert not reminders.is_within_send_window(self._at(23))
+
+    def test_morning_and_evening_are_blocked(self):
+        from core import reminders
+        assert not reminders.is_within_send_window(self._at(9))
+        assert not reminders.is_within_send_window(self._at(13, 59))
+        assert not reminders.is_within_send_window(self._at(17, 0))
+        assert not reminders.is_within_send_window(self._at(20))
+
+    def test_afternoon_is_allowed(self):
+        from core import reminders
+        assert reminders.is_within_send_window(self._at(14, 0))
+        assert reminders.is_within_send_window(self._at(15))
+        assert reminders.is_within_send_window(self._at(16, 59))
+
+    def test_naive_datetime_is_treated_as_jst(self):
+        import datetime as dt
+
+        from core import reminders
+        assert reminders.is_within_send_window(dt.datetime(2026, 8, 29, 15, 0))
+        assert not reminders.is_within_send_window(dt.datetime(2026, 8, 29, 2, 0))
+
+    def test_utc_input_is_converted(self):
+        """UTC で来ても JST に直して判定する（Actions は UTC で動く）。"""
+        import datetime as dt
+
+        from core import reminders
+        # 06:00 UTC = 15:00 JST → 送る
+        assert reminders.is_within_send_window(
+            dt.datetime(2026, 8, 29, 6, 0, tzinfo=dt.timezone.utc))
+        # 15:30 UTC = 翌 0:30 JST → 送らない
+        assert not reminders.is_within_send_window(
+            dt.datetime(2026, 8, 29, 15, 30, tzinfo=dt.timezone.utc))
