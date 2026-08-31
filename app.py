@@ -35,7 +35,7 @@ except Exception:
 from auth import google_oauth, persist, session  # noqa: E402
 from config import settings  # noqa: E402
 from core import meeting_context  # noqa: E402
-from core.progress import latest_one_point  # noqa: E402
+from core.progress import hide_resolved_errors, latest_one_point  # noqa: E402
 from core.models import EvaluationResult  # noqa: E402
 from services import drive_sa, gemini_analyzer, google_drive, storage, usage_log  # noqa: E402
 from ui import components, theme  # noqa: E402
@@ -798,7 +798,7 @@ def render_history_tab(user: dict) -> None:
 
     if view_all:
         # 管理者・閲覧専用は切り替え不要で、常に全メンバーの実績・成長を閲覧できる。
-        all_records = storage.list_all_evaluations()
+        all_records = hide_resolved_errors(storage.list_all_evaluations())
         _render_practice_overview(all_records)
         # 評価対象者（8名）は実績ゼロでも選べるようにする（成長グラフ用）。
         rec_emails = {r.get("user_email", "") for r in all_records if r.get("user_email")}
@@ -815,6 +815,10 @@ def render_history_tab(user: dict) -> None:
         st.caption(f"表示中：{len(records)} 件（{cap}）")
     else:
         records = storage.list_evaluations(user["email"])
+
+    # 後で成功した商談の失敗記録は出さない。枠切れ・混雑は翌日の再挑戦で通るので、
+    # 古い失敗が残り続けると、うまくいっているのに壊れて見える。
+    records = hide_resolved_errors(records)
 
     if not records:
         st.caption("まだ評価履歴がありません。")

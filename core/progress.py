@@ -46,3 +46,27 @@ def latest_one_point(records: list[dict]) -> dict | None:
             "saved_at": _saved_at(rec)[:10],
         }
     return None
+
+
+def hide_resolved_errors(records: list[dict]) -> list[dict]:
+    """後で成功した商談の「失敗」記録を、一覧から取り除く。
+
+    枠切れ(429)やモデル混雑(503)は待てば直るので、翌日以降に再挑戦して成功する。
+    それでも古い失敗が残り続けると、うまくいっているのに壊れて見える。
+    同じ案件の成功が1件でもあれば、その案件の失敗記録は隠す。
+
+    まだ成功していない案件の失敗は残す（対処が要る本物の失敗なので）。
+    """
+    from core.auto_eval import case_ids_in
+
+    succeeded: set[str] = set()
+    for rec in records or []:
+        if rec.get("status") == "done":
+            succeeded |= case_ids_in(rec.get("label", ""))
+
+    out = []
+    for rec in records or []:
+        if rec.get("status") == "error" and (case_ids_in(rec.get("label", "")) & succeeded):
+            continue
+        out.append(rec)
+    return out

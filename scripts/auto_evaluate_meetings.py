@@ -78,9 +78,11 @@ def _collect(targets: list[str], sa_info: dict, lookback_days: int):
 
     戻り値: (candidates, done_case_ids)。
     候補は {planner, case_id, summary, start, start_date}。
+    counts は担当者ごとの「評価済み商談の件数」（少ない人から回すために使う）。
     """
     candidates: list[dict] = []
     done: set[str] = set()
+    counts: dict[str, int] = {}
 
     for planner in targets:
         # 1) カレンダーから初回商談を集める
@@ -111,11 +113,19 @@ def _collect(targets: list[str], sa_info: dict, lookback_days: int):
         # 2) 既存の評価履歴から「もう評価しなくてよい案件」を集める。
         #    失敗は再挑戦の対象（無料枠の枠切れで落ちた商談を取りこぼさない）。
         try:
-            done |= done_case_ids(storage.list_evaluations(planner))
+            records = storage.list_evaluations(planner)
+            done |= done_case_ids(records)
+            # 評価がどれだけ進んでいるかを担当者ごとに数える（商談のみ・成功のみ）。
+            counts[planner] = sum(
+                1 for r in records
+                if r.get("status") == "done"
+                and not str(r.get("label", "")).startswith("🎙️")
+            )
         except Exception as e:  # noqa: BLE001 履歴が読めなくても評価自体は進める
             print(f"  評価履歴の読込み失敗（重複除外に反映されず）: {planner}: {str(e)[:120]}")
+            counts[planner] = 0
 
-    return candidates, done
+    return candidates, done, counts
 
 
 def _log(message: str) -> None:
@@ -199,8 +209,8 @@ def main() -> int:
         print("SA鍵が未設定（CALENDAR_SA_JSON / GOOGLE_SERVICE_ACCOUNT_FILE）。評価せず終了。")
         return 0
 
-    candidates, done = _collect(targets, sa_info, lookback)
-    selected = select_targets(candidates, done, limit)
+    candidates, done, counts = _collect(targets, sa_info, lookback)
+    selected = select_targets(candidates, done, limit, counts)
     print(f"初回商談の候補 {len(candidates)} 件 / 評価済み {len(done)} 案件 "
           f"/ 今回の対象 {len(selected)} 件")
 

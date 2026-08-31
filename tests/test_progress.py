@@ -1,5 +1,5 @@
 """ステップアップの仕組み（前回の1ポイントの引き継ぎ）のテスト。"""
-from core import prompts
+from core import progress, prompts
 from core.models import EvaluationResult
 from core.progress import latest_one_point
 
@@ -112,3 +112,32 @@ def test_next_action_is_only_in_one_point():
     schema = p.split("# 出力フォーマット", 1)[1]
     assert "改善の指示は one_point に1つだけ書く" in schema
     assert "点数の根拠" in schema
+
+
+class TestHideResolvedErrors:
+    """後で成功した商談の失敗記録は一覧に出さない。"""
+
+    def _rec(self, case_id, status, saved_at="2026-08-28 05:00:00"):
+        return {"label": f"◎初回商談 オンライン {case_id}　趙様", "status": status,
+                "saved_at": saved_at, "result": {"scores": []}}
+
+    def test_failure_is_hidden_once_the_same_meeting_succeeds(self):
+        recs = [self._rec("L260802488601", "error"), self._rec("L260802488601", "done")]
+        got = progress.hide_resolved_errors(recs)
+        assert [r["status"] for r in got] == ["done"]
+
+    def test_unresolved_failure_is_kept(self):
+        """まだ成功していない失敗は残す（対処が要る本物の失敗）。"""
+        recs = [self._rec("L260802488601", "error")]
+        assert progress.hide_resolved_errors(recs) == recs
+
+    def test_other_meetings_are_untouched(self):
+        recs = [self._rec("L111111", "error"), self._rec("L222222", "done")]
+        assert len(progress.hide_resolved_errors(recs)) == 2
+
+    def test_roleplay_records_pass_through(self):
+        recs = [{"label": "🎙️1人ロープレ｜導入", "status": "done"}]
+        assert progress.hide_resolved_errors(recs) == recs
+
+    def test_empty_is_safe(self):
+        assert progress.hide_resolved_errors([]) == []

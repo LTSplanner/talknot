@@ -91,35 +91,53 @@ def _sort_key(candidate: dict) -> str:
 
 
 def select_targets(
-    candidates: list[dict], done_case_ids: set[str], limit: int
+    candidates: list[dict], done_case_ids: set[str], limit: int,
+    evaluated_counts: dict[str, int] | None = None,
 ) -> list[dict]:
-    """自動評価する候補を『古い順・最大 limit 件』に絞って返す。
+    """自動評価する候補を『担当者に均等・古い順・最大 limit 件』で返す。
 
     candidates の各要素は {planner, case_id, summary, start, start_date} を想定。
     - case_id が空のものは除外（案件と紐づかない予定は評価しない）。
-    - done_case_ids（正規化済み案件番号）に含まれる case_id は除外（二重評価/無限リトライ防止）。
+    - done_case_ids に含まれる case_id は除外（二重評価の防止）。
     - 同じ case_id が複数あれば1件だけ残す（最も古いもの）。
-    - start（無ければ start_date）の昇順＝古い順で最大 limit 件を返す。
+
+    **担当者ごとに順番に取る**（ラウンドロビン）。以前は全員をまとめて古い順に
+    並べていたため、古い商談を多く持つ人ばかり評価が進み、実際に
+    「8件の人と2件の人」という偏りが出た。各自の中では古い順に処理する。
+
+    evaluated_counts（担当者→これまでの評価済み件数）を渡すと、**少ない人から**
+    順番を始める。これで全体が追いつく。
 
     純関数。入力リストは変更しない。
     """
     if limit <= 0:
         return []
 
-    # 古い順に並べてから、案件番号で重複排除（最初＝最も古い1件を残す）。
-    ordered = sorted(candidates, key=_sort_key)
     done = {_norm_case_id(c) for c in done_case_ids if _norm_case_id(c)}
 
-    selected: list[dict] = []
+    # 担当者ごとに、古い順の待ち行列を作る（案件番号の重複はここで落とす）。
+    queues: dict[str, list[dict]] = {}
     seen: set[str] = set()
-    for c in ordered:
+    for c in sorted(candidates, key=_sort_key):
         cid = _norm_case_id(c.get("case_id", ""))
-        if not cid:
-            continue
-        if cid in done or cid in seen:
+        if not cid or cid in done or cid in seen:
             continue
         seen.add(cid)
-        selected.append(c)
-        if len(selected) >= limit:
-            break
+        queues.setdefault(c.get("planner", ""), []).append(c)
+
+    # 評価済みが少ない人を先に。同数なら、待っている商談が古い人を先に。
+    counts = evaluated_counts or {}
+    order = sorted(
+        queues,
+        key=lambda p: (counts.get(p, 0), _sort_key(queues[p][0])),
+    )
+
+    selected: list[dict] = []
+    while len(selected) < limit and any(queues[p] for p in order):
+        for planner in order:
+            if not queues[planner]:
+                continue
+            selected.append(queues[planner].pop(0))
+            if len(selected) >= limit:
+                break
     return selected
