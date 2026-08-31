@@ -4,8 +4,8 @@
   1. 各プランナー（settings.TARGET_ACCOUNTS）を DWD サービスアカウントで impersonate。
   2. google_calendar.list_meetings() で直近の商談予定を取得し、
      core.auto_eval.is_first_meeting() で「初回商談」だけに絞る。
-  3. storage.list_evaluations() の label から評価済み案件番号を集め、二重評価を防ぐ。
-  4. core.auto_eval.select_targets() で『古い未処理から順・1日◯件まで』に絞る。
+  3. storage.list_evaluations() から評価済み案件番号と担当者ごとの実績件数を集める。
+  4. core.auto_eval.select_targets() で『担当者に均等・各自は古い順・1日◯件まで』に絞る。
   5. 選ばれた各件を find_recording() で録画照合 → 見つかったものだけ
      download_to_path() で一時保存 → gemini_analyzer.analyze() → storage.save_evaluation()。
      録画未検出はスキップ（次回に持ち越し）。失敗は fail_evaluation() して継続。
