@@ -1365,3 +1365,64 @@ def list_evaluations(user_email: str) -> list[dict]:
         except (json.JSONDecodeError, OSError):
             continue
     return records
+
+
+# --------------------------------------------------------------------------- #
+# 相棒キャラクター（1人1体を選んで育てる）の状態
+# --------------------------------------------------------------------------- #
+_COMPANION_JSON_NAME = "companion.json"
+
+
+def _companion_path() -> Path:
+    return settings.DATA_DIR / _COMPANION_JSON_NAME
+
+
+def _load_companion_all() -> dict:
+    """全員ぶんの相棒の状態（{メール: {selected, history}}）。"""
+    if _use_eval_sheets():
+        from services import sheets_knowledge
+
+        try:
+            return sheets_knowledge.load_companion_states()
+        except Exception:  # noqa: BLE001 読めなくても既定の相棒で動かす
+            return {}
+    if _use_gcs():
+        blob = _bucket().blob(_gcs_path(_COMPANION_JSON_NAME))
+        if not blob.exists():
+            return {}
+        try:
+            return json.loads(blob.download_as_text())
+        except (json.JSONDecodeError, OSError):
+            return {}
+    path = _companion_path()
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def get_companion_state(user_email: str) -> dict:
+    """その人が選んでいる相棒と乗り換え履歴。未設定なら空 dict（＝既定の1体）。"""
+    data = _load_companion_all()
+    state = data.get(user_email)
+    return state if isinstance(state, dict) else {}
+
+
+def set_companion_state(user_email: str, state: dict) -> None:
+    """その人の相棒の状態を保存する（他の人の行は触らない）。"""
+    if _use_eval_sheets():
+        from services import sheets_knowledge
+
+        sheets_knowledge.save_companion_state(user_email, state)
+        return
+    data = _load_companion_all()
+    data[user_email] = state
+    payload = json.dumps(data, ensure_ascii=False, indent=2)
+    if _use_gcs():
+        _bucket().blob(_gcs_path(_COMPANION_JSON_NAME)).upload_from_string(
+            payload, content_type="application/json")
+        return
+    settings.DATA_DIR.mkdir(parents=True, exist_ok=True)
+    _companion_path().write_text(payload, encoding="utf-8")

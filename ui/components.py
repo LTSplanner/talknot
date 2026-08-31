@@ -521,3 +521,93 @@ def sidebar(user: dict) -> None:
 def feedback_kind_options() -> list[str]:
     """ご意見箱の種別。迷わず選べるよう少数に絞る。"""
     return ["🛠 こう直してほしい", "🐛 うまく動かない", "💡 こんな機能がほしい", "💬 その他"]
+
+
+def companion_card(c) -> None:
+    """いま育てている相棒のカード。ロープレ画面の先頭に置いて「会いに行く理由」にする。
+
+    数字（経験値・段階）より、相棒の様子と一言が先に目に入る並びにしている。
+    """
+    st.markdown(
+        f"""
+        <div class="tk-card" style="text-align:left;border-left:5px solid {theme.BRAND};
+             background:{theme.BRAND}0d">
+          <div style="display:flex;align-items:center;gap:1rem">
+            <div style="font-size:3.2rem;line-height:1">{c.icon}</div>
+            <div style="flex:1">
+              <div style="font-weight:700;font-size:1.05rem;color:{theme.BRAND_INK}">
+                {c.name}<span style="font-size:.85rem;color:{theme.MUTED}">
+                （{c.species_name}）　Lv.{c.stage} / {c.stage_count}　
+                {c.mood_icon} {c.mood}</span>
+              </div>
+              <div style="color:{theme.MUTED};font-size:.86rem;margin-top:.15rem">
+                {c.description}</div>
+            </div>
+          </div>
+          <p style="margin:.7rem 0 0;font-size:.95rem">💬 {c.message}</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    if c.is_max:
+        st.caption(f"最終段階まで育てました（この子と {c.sessions} 本・経験値 {c.exp}）")
+    else:
+        st.progress(c.progress)
+        st.caption(
+            f"次の姿まで あと {c.exp_for_next}　"
+            f"（1本で10、20点以上なら+5、続けた日数でさらに+3）"
+        )
+
+
+def companion_collection(items, on_switch=None) -> None:
+    """相棒図鑑。育つのは選んでいる1体だけなので、乗り換えボタンもここに置く。
+
+    items は core.companion.collection() の返り値。on_switch(species_id) を渡すと
+    未選択かつ解放済みの相棒に「この子に乗り換える」ボタンが出る。
+    """
+    st.caption(
+        "育つのは **いま選んでいる1体だけ** です。乗り換えると、その日のロープレから"
+        "新しい相棒に経験値が入ります（前の相棒はいまの姿のまま図鑑に残ります）。"
+    )
+    for i in range(0, len(items), 3):
+        for col, c in zip(st.columns(3), items[i:i + 3]):
+            with col:
+                _companion_tile(c)
+                if on_switch and c.unlocked and not c.selected:
+                    if st.button("この子に乗り換える", key=f"cmp_pick_{c.species_id}",
+                                 use_container_width=True):
+                        on_switch(c.species_id)
+
+
+def _companion_tile(c) -> None:
+    """図鑑の1マス。未解放は姿を伏せて、開く条件だけを見せる。"""
+    if not c.unlocked:
+        st.markdown(
+            f"""
+            <div class="tk-card" style="text-align:center;opacity:.55">
+              <div style="font-size:2.4rem;line-height:1.3">❔</div>
+              <div style="font-weight:700">？？？</div>
+              <div style="color:{theme.MUTED};font-size:.78rem;margin-top:.2rem">
+                🔒 {c.unlock_label}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        return
+    border = f"2px solid {theme.BRAND}" if c.selected else "1px solid #e6e6e6"
+    tag = (f'<div style="color:{theme.BRAND};font-size:.72rem;font-weight:700">'
+           f'育成中</div>') if c.selected else '<div style="height:1.05rem"></div>'
+    st.markdown(
+        f"""
+        <div class="tk-card" style="text-align:center;border:{border}">
+          {tag}
+          <div style="font-size:2.4rem;line-height:1.3">{c.icon}</div>
+          <div style="font-weight:700">{c.name}</div>
+          <div style="color:{theme.MUTED};font-size:.78rem">
+            {c.species_name}　Lv.{c.stage} / {c.stage_count}</div>
+          <div style="color:{theme.MUTED};font-size:.75rem;margin-top:.2rem">
+            この子と {c.sessions} 本　経験値 {c.exp}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )

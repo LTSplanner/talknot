@@ -979,6 +979,47 @@ def _roleplay_worker(
         gc.collect()
 
 
+def _variety_for(scenario: dict, turn_count: int):
+    """今日の『揺らぎ』（お客様カード・アドリブ・ミッション）を引く。
+
+    - セッション内では固定（seed を rp_variety_{単元} に保存）。画面のセリフ・音声・
+      AI評価がずれないようにするため、選び直しはリセットか引き直しボタンのときだけ。
+    - フラグOFFの人には None を返す（従来どおりの台本のまま）。
+    """
+    email = (st.session_state.get("user") or {}).get("email")
+    if not settings.feature_visible("roleplay_variety", email):
+        return None
+    from core import roleplay_variety
+
+    key = f"rp_variety_{scenario.get('id', '')}"
+    seed = st.session_state.get(key)
+    if not isinstance(seed, int):
+        seed = random.randrange(1 << 30)
+        st.session_state[key] = seed
+    return roleplay_variety.draw(seed, turn_count, int(scenario.get("level", 1) or 1))
+
+
+def _render_today_customer(scenario: dict, turn_count: int, locked: bool) -> None:
+    """今日のお客様カードと『今日のミッション』を出す（毎回ちがう相手にするため）。
+
+    台本を暗記しても、相手の温度感・同席者・気にしていることが毎回変わり、
+    途中で台本に無いアドリブが飛んでくるので、読み上げでは終われないようにする。
+    """
+    variety = _variety_for(scenario, turn_count)
+    if variety is None:
+        return
+    n_adlib = len(variety.adlibs)
+    with st.container(border=True):
+        st.markdown(f"**🎲 今日のお客様**　{variety.card_line}")
+        st.caption(variety.acting_note.replace("\n", "　／　"))
+        st.markdown(f"**🎯 今日のミッション**：{variety.mission}")
+        if n_adlib:
+            st.caption(f"※ 台本に無いアドリブが {n_adlib} 回 割り込みます（どこかは秘密です）")
+        if not locked and st.button("🎲 相手を引き直す", key="rp_variety_reroll"):
+            st.session_state.pop(f"rp_variety_{scenario.get('id', '')}", None)
+            st.rerun()
+
+
 def _session_turns(scenario: dict) -> list[dict]:
     """台本ターンを取得し、`variants`（切り口違いの雑談パターン）があれば
     セッション内で固定した1つに差し替えて返す。
@@ -1014,6 +1055,11 @@ def _session_turns(scenario: dict) -> list[dict]:
                 and len([d for d in dialog if str(d).strip()]) >= 2):
             t["dialog"] = [str(d) for d in dialog if str(d).strip()]
         t.pop("variants", None)
+    variety = _variety_for(scenario, len(turns))
+    if variety is not None:
+        from core import roleplay_variety
+
+        turns = roleplay_variety.apply(turns, variety)
     return turns
 
 
@@ -1098,7 +1144,37 @@ def _render_unit_hook_photo(scenario: dict) -> None:
         pass
 
 
+def _render_companion(user: dict) -> None:
+    """ロープレ画面の先頭に相棒を出す（フラグOFFのあいだは先行公開の対象者だけ）。
+
+    育つのは選んでいる1体だけ。図鑑と乗り換えは折りたたみの中に置き、
+    ロープレを始める導線の邪魔をしないようにしている。
+    """
+    if not settings.feature_visible("companion", user.get("email")):
+        return
+    email = user.get("email", "")
+    try:
+        from core import companion, reminders
+
+        records = storage.list_evaluations(email)
+        today = reminders.today_jst_str()
+        state = storage.get_companion_state(email)
+        components.companion_card(companion.compute(records, today, state))
+
+        with st.expander("🧸 相棒図鑑（育てる子を選ぶ）", expanded=False):
+            def _switch(species_id: str) -> None:
+                storage.set_companion_state(
+                    email, companion.switch_to(state, species_id, today))
+                st.rerun()
+
+            components.companion_collection(
+                companion.collection(records, today, state), on_switch=_switch)
+    except Exception:  # noqa: BLE001 相棒の表示でロープレ機能を止めない
+        pass
+
+
 def render_roleplay_tab(user: dict) -> None:
+    _render_companion(user)
     st.markdown("##### 🎙️ 1人ロープレ（AIのお客様と対話 → その場で評価）")
     st.write(
         "相手役がいなくても、**1人でいつでも**ロープレできます。台本のお客様に対して"
@@ -1163,6 +1239,7 @@ def render_roleplay_tab(user: dict) -> None:
     st.caption(
         f"難易度：{'★' * int(lv)}{'☆' * (2 - int(lv))}　／ 全 {len(turns)} ターン"
     )
+    _render_today_customer(scenario, len(turns), locked)
     if not storage.get_talk_script():
         st.caption("⚠️ 模範トークスクリプトが未登録です（下の管理者欄で登録すると、その型を基準に採点します）。")
 

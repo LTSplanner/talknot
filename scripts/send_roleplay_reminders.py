@@ -268,14 +268,37 @@ def _streak_line(streak: int) -> str:
     return f"\n\n🔥 今日やれば {streak + 1} 日つづけて達成です。"
 
 
+def _companion_line(records: list[dict], email: str, today: str) -> str:
+    """相棒の成長報告の一行。出勤日のリマインドに添えて「会いに行く理由」を思い出させる。
+
+    相棒はロープレ履歴から計算するだけなので、送信のために増やす保存物はない。
+    読めないとき（シート未設定・機能OFF）は静かに空文字を返し、送信は止めない。
+    """
+    # 先行公開の段階では、対象者にだけ相棒の報告を添える（全員公開後は全員に付く）。
+    if not settings.feature_visible("companion", email):
+        return ""
+    try:
+        from core import companion
+        from services import storage
+
+        mine = [r for r in records if r.get("user_email") == email]
+        state = storage.get_companion_state(email)
+        c = companion.compute(mine, today, state)
+        if c.sessions == 0:
+            return "\n\n🥚 相棒がまだ眠っています。1本やると生まれます。"
+        return f"\n\n{companion.summary_line(c)}　{c.mood_icon} {c.message}"
+    except Exception:  # noqa: BLE001 相棒の報告でリマインドを止めない
+        return ""
+
+
 def _message_for(
     email: str, display_names: dict[str, str] | None = None, today: str = "",
-    streak: int = 0,
+    streak: int = 0, companion_line: str = "",
 ) -> str:
-    """その人・その日のリマインド本文（＋連続記録＋アプリURL）。"""
+    """その人・その日のリマインド本文（＋連続記録＋相棒の成長＋アプリURL）。"""
     body = _MESSAGES[_variant_index(email, today)]
     return (f"{body.format(name=_name_of(email, display_names))}"
-            f"{_streak_line(streak)}\n{_APP_URL}")
+            f"{_streak_line(streak)}{companion_line}\n{_APP_URL}")
 
 
 def main() -> int:
@@ -355,8 +378,11 @@ def main() -> int:
             [r for r in records if r.get("user_email") == email], "roleplay", today)
         for email in missed
     }
+    # 相棒（たまごっち）の成長報告を添える。送る相手＝出勤日の人だけなので、
+    # 休みの日に「育ってますよ」と急かすことにはならない。
     email_to_text = {
-        email: _message_for(email, names, today, streaks.get(email, 0))
+        email: _message_for(email, names, today, streaks.get(email, 0),
+                            _companion_line(records, email, today))
         for email in missed
     }
 

@@ -124,6 +124,55 @@ def append_reminder_log(date_str: str, emails: list[str]) -> None:
     ).execute()
 
 
+# 相棒キャラクター（たまごっち）の状態。保存するのは「誰が・どの子を選んでいるか」と
+# 「いつ乗り換えたか」だけ。経験値はロープレ履歴から毎回計算するので保存しない。
+_COMPANION_TAB = "Companion"
+_COMPANION_HEADER = ["メール", "選択中", "乗り換え履歴(JSON)", "更新日時"]
+
+
+def load_companion_states() -> dict[str, dict]:
+    """全員ぶんの相棒の状態を {メール: {selected, history}} で返す。読めなければ空。"""
+    try:
+        svc = _service()
+        resp = svc.spreadsheets().values().get(
+            spreadsheetId=_eval_sheet_id(), range=f"{_COMPANION_TAB}!A2:D").execute()
+    except Exception:  # noqa: BLE001 タブが無い初回など
+        return {}
+    out: dict[str, dict] = {}
+    for row in resp.get("values", []):
+        def c(i):
+            return (row[i] if len(row) > i else "").strip()
+        if not c(0):
+            continue
+        try:
+            history = json.loads(c(2)) if c(2) else []
+        except ValueError:
+            history = []
+        out[c(0)] = {"selected": c(1), "history": history}
+    return out
+
+
+def save_companion_state(email: str, state: dict) -> None:
+    """1人ぶんの相棒の状態を書き込む（同じメールの行があれば上書き、無ければ追記）。
+
+    他の人の行は読み直してそのまま書き戻すため、同時に触っても消えない
+    （評価履歴で全消し事故が起きたので、先に書いてから余りを消す順を守る）。
+    """
+    svc = _service()
+    sid = _eval_sheet_id()
+    _ensure_tab(svc, _COMPANION_TAB, sheet_id=sid)
+    states = load_companion_states()
+    states[email] = state
+    values = [_COMPANION_HEADER] + [
+        [mail, str(st.get("selected", "")),
+         json.dumps(st.get("history") or [], ensure_ascii=False), _now_str()]
+        for mail, st in sorted(states.items())
+    ]
+    svc.spreadsheets().values().update(
+        spreadsheetId=sid, range=f"{_COMPANION_TAB}!A1",
+        valueInputOption="RAW", body={"values": values}).execute()
+
+
 # プランナーからの要望・不具合報告。ホストはこのタブを直接見て対応できる。
 _FEEDBACK_TAB = "Feedback"
 _FEEDBACK_HEADER = ["送信日時", "送信者", "種別", "内容", "対応状況"]

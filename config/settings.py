@@ -233,10 +233,19 @@ FEATURE_OBJECTION_DRILL = _bool_env("FEATURE_OBJECTION_DRILL", True)
 # まず先行公開の対象者に見てもらい、問題なければ True にして全員へ。
 FEATURE_FEEDBACK_BOX = _bool_env("FEATURE_FEEDBACK_BOX", False)
 
+# 応用③「相棒キャラクター」。ロープレを続けると育つ。毎日会いに行く理由をつくる。
+FEATURE_COMPANION = _bool_env("FEATURE_COMPANION", False)
+
+# 応用④「ロープレの揺らぎ」。お客様カード・アドリブ・今日のミッションを毎回引き直し、
+# 台本を暗記しても読み上げでは終われないようにする。
+FEATURE_ROLEPLAY_VARIETY = _bool_env("FEATURE_ROLEPLAY_VARIETY", False)
+
 # 機能名 → フラグ値の対応表（未知の名前は False）。
 _FEATURE_FLAGS = {
     "objection_drill": FEATURE_OBJECTION_DRILL,
     "feedback_box": FEATURE_FEEDBACK_BOX,
+    "companion": FEATURE_COMPANION,
+    "roleplay_variety": FEATURE_ROLEPLAY_VARIETY,
 }
 
 
