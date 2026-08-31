@@ -201,3 +201,45 @@ class TestRobustness:
         c = companion.compute(_records(40), _day(40))
         line = companion.summary_line(c)
         assert len(line) <= 60 and c.name in line
+
+
+class TestNaming:
+    """名前を付けられると愛着がわく。付けた名前は姿が変わっても残る。"""
+
+    def test_a_named_partner_is_called_by_that_name(self):
+        state = companion.rename({}, defs.DEFAULT_ID, "ぴよ太")
+        c = companion.compute(_records(5), _day(5), state)
+        assert c.nickname == "ぴよ太" and c.display_name == "ぴよ太"
+
+    def test_without_a_name_the_stage_name_is_used(self):
+        c = companion.compute(_records(5), _day(5), {})
+        assert c.nickname == "" and c.display_name == c.name
+
+    def test_the_name_survives_growing_up(self):
+        state = companion.rename({}, defs.DEFAULT_ID, "ぴよ太")
+        young = companion.compute(_records(5), _day(5), state)
+        grown = companion.compute(_records(150), _day(150), state)
+        assert young.name != grown.name
+        assert grown.nickname == "ぴよ太"
+
+    def test_the_name_survives_switching_partners(self):
+        state = companion.rename({}, "tori", "ぴよ太")
+        state = companion.switch_to(state, "neko", _day(10))
+        state = companion.rename(state, "neko", "みけ")
+        book = {c.species_id: c for c in companion.collection(_records(20), _day(20), state)}
+        assert book["tori"].nickname == "ぴよ太"
+        assert book["neko"].nickname == "みけ"
+
+    def test_names_are_trimmed_and_capped(self):
+        state = companion.rename({}, "tori", "　　" + "あ" * 40 + "　")
+        assert len(state["names"]["tori"]) == companion.NICKNAME_MAX
+
+    def test_clearing_the_name_goes_back_to_the_stage_name(self):
+        state = companion.rename({}, "tori", "ぴよ太")
+        state = companion.rename(state, "tori", "   ")
+        assert companion.compute([], _day(0), state).display_name == "たまご"
+
+    def test_the_chat_line_uses_the_name(self):
+        state = companion.rename({}, defs.DEFAULT_ID, "ぴよ太")
+        line = companion.summary_line(companion.compute(_records(40), _day(40), state))
+        assert "ぴよ太" in line and len(line) <= 60

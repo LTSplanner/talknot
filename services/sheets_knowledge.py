@@ -127,7 +127,7 @@ def append_reminder_log(date_str: str, emails: list[str]) -> None:
 # 相棒キャラクター（たまごっち）の状態。保存するのは「誰が・どの子を選んでいるか」と
 # 「いつ乗り換えたか」だけ。経験値はロープレ履歴から毎回計算するので保存しない。
 _COMPANION_TAB = "Companion"
-_COMPANION_HEADER = ["メール", "選択中", "乗り換え履歴(JSON)", "更新日時"]
+_COMPANION_HEADER = ["メール", "選択中", "乗り換え履歴(JSON)", "名前(JSON)", "更新日時"]
 
 
 def load_companion_states() -> dict[str, dict]:
@@ -135,7 +135,7 @@ def load_companion_states() -> dict[str, dict]:
     try:
         svc = _service()
         resp = svc.spreadsheets().values().get(
-            spreadsheetId=_eval_sheet_id(), range=f"{_COMPANION_TAB}!A2:D").execute()
+            spreadsheetId=_eval_sheet_id(), range=f"{_COMPANION_TAB}!A2:E").execute()
     except Exception:  # noqa: BLE001 タブが無い初回など
         return {}
     out: dict[str, dict] = {}
@@ -148,7 +148,11 @@ def load_companion_states() -> dict[str, dict]:
             history = json.loads(c(2)) if c(2) else []
         except ValueError:
             history = []
-        out[c(0)] = {"selected": c(1), "history": history}
+        try:
+            names = json.loads(c(3)) if c(3) else {}
+        except ValueError:
+            names = {}
+        out[c(0)] = {"selected": c(1), "history": history, "names": names}
     return out
 
 
@@ -165,7 +169,8 @@ def save_companion_state(email: str, state: dict) -> None:
     states[email] = state
     values = [_COMPANION_HEADER] + [
         [mail, str(st.get("selected", "")),
-         json.dumps(st.get("history") or [], ensure_ascii=False), _now_str()]
+         json.dumps(st.get("history") or [], ensure_ascii=False),
+         json.dumps(st.get("names") or {}, ensure_ascii=False), _now_str()]
         for mail, st in sorted(states.items())
     ]
     svc.spreadsheets().values().update(

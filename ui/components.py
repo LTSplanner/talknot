@@ -523,6 +523,44 @@ def feedback_kind_options() -> list[str]:
     return ["🛠 こう直してほしい", "🐛 うまく動かない", "💡 こんな機能がほしい", "💬 その他"]
 
 
+def pixel_avatar(species_id: str, stage: int, size: int = 72) -> str:
+    """相棒のドット絵を、2コマで動く SVG にして返す（画像ファイルを持たない）。
+
+    同じ色が横に続くところは1本の矩形にまとめて、要素数を抑えている。
+    """
+    from core import pixel_sprites
+
+    palette = pixel_sprites.colors(species_id)
+    groups = []
+    for frame in (0, 1):
+        rects = []
+        for y, row in enumerate(pixel_sprites.sprite(species_id, stage, frame)):
+            x = 0
+            while x < len(row):
+                ch = row[x]
+                run = 1
+                while x + run < len(row) and row[x + run] == ch:
+                    run += 1
+                if ch != ".":
+                    rects.append(
+                        f'<rect x="{x}" y="{y}" width="{run}" height="1" '
+                        f'fill="{palette.get(ch, "#000")}"/>'
+                    )
+                x += run
+        groups.append(f'<g class="f{frame}">' + "".join(rects) + "</g>")
+    return (
+        f'<svg class="tk-pixel" width="{size}" height="{size}" '
+        f'viewBox="0 0 {pixel_sprites.GRID} {pixel_sprites.GRID}" '
+        f'shape-rendering="crispEdges" aria-hidden="true">'
+        + "".join(groups) + "</svg>"
+    )
+
+
+def _species_label(c) -> str:
+    """種族名（＋名前を付けている人には今の姿の名前も）。同じ語を2度出さない。"""
+    return f"{c.species_name}・{c.name}" if c.nickname else c.species_name
+
+
 def companion_card(c) -> None:
     """いま育てている相棒のカード。ロープレ画面の先頭に置いて「会いに行く理由」にする。
 
@@ -533,11 +571,11 @@ def companion_card(c) -> None:
         <div class="tk-card" style="text-align:left;border-left:5px solid {theme.BRAND};
              background:{theme.BRAND}0d">
           <div style="display:flex;align-items:center;gap:1rem">
-            <div style="font-size:3.2rem;line-height:1">{c.icon}</div>
+            {pixel_avatar(c.species_id, c.stage, 76)}
             <div style="flex:1">
               <div style="font-weight:700;font-size:1.05rem;color:{theme.BRAND_INK}">
-                {c.name}<span style="font-size:.85rem;color:{theme.MUTED}">
-                （{c.species_name}）　Lv.{c.stage} / {c.stage_count}　
+                {c.display_name}<span style="font-size:.85rem;color:{theme.MUTED}">
+                （{_species_label(c)}）　Lv.{c.stage} / {c.stage_count}　
                 {c.mood_icon} {c.mood}</span>
               </div>
               <div style="color:{theme.MUTED};font-size:.86rem;margin-top:.15rem">
@@ -601,10 +639,11 @@ def _companion_tile(c) -> None:
         f"""
         <div class="tk-card" style="text-align:center;border:{border}">
           {tag}
-          <div style="font-size:2.4rem;line-height:1.3">{c.icon}</div>
-          <div style="font-weight:700">{c.name}</div>
+          <div style="display:flex;justify-content:center">
+            {pixel_avatar(c.species_id, c.stage, 56)}</div>
+          <div style="font-weight:700">{c.display_name}</div>
           <div style="color:{theme.MUTED};font-size:.78rem">
-            {c.species_name}　Lv.{c.stage} / {c.stage_count}</div>
+            {_species_label(c)}　Lv.{c.stage} / {c.stage_count}</div>
           <div style="color:{theme.MUTED};font-size:.75rem;margin-top:.2rem">
             この子と {c.sessions} 本　経験値 {c.exp}</div>
         </div>

@@ -11,7 +11,9 @@
 - **叱らない**。間が空いても退化も死にもしない。眠って待つだけで、1本やれば起きる。
 
 保存する状態（services.storage.get_companion_state）の形：
-    {"selected": "tori", "history": [{"date": "2026-08-01", "id": "tori"}, ...]}
+    {"selected": "tori",
+     "history": [{"date": "2026-08-01", "id": "tori"}, ...],
+     "names": {"tori": "ぴよ太"}}
 """
 from __future__ import annotations
 
@@ -58,11 +60,17 @@ class Companion:
     unlock_label: str = ""   # 未解放のときの条件文
     selected: bool = False   # いま育てている1体か
     # 以下は「いま育てている1体」だけが持つ（他は既定値のまま）
+    nickname: str = ""       # プランナーが付けた名前（未設定なら空）
     mood: str = ""
     mood_icon: str = ""
     days_since: int = -1     # 最後のロープレからの日数（未実施なら -1）
     streak: int = 0          # いま続いている連続日数
     message: str = ""        # 相棒からの一言
+
+    @property
+    def display_name(self) -> str:
+        """画面での呼び名。名前を付けていればそれ、無ければ今の姿の名前。"""
+        return self.nickname or self.name
 
     @property
     def progress(self) -> float:
@@ -129,7 +137,33 @@ def normalize_state(state: dict | None) -> dict:
         history[-1]["id"] if history else DEFAULT_ID)
     if selected not in BY_ID:
         selected = DEFAULT_ID
-    return {"selected": selected, "history": history}
+    names = {}
+    raw_names = state.get("names")
+    if isinstance(raw_names, dict):
+        for sid, nick in raw_names.items():
+            if sid in BY_ID:
+                nick = str(nick).strip()[:NICKNAME_MAX]
+                if nick:
+                    names[sid] = nick
+    return {"selected": selected, "history": history, "names": names}
+
+
+NICKNAME_MAX = 12
+
+
+def rename(state: dict | None, species_id: str, nickname: str) -> dict:
+    """相棒に名前をつける（空にすると姿の名前に戻る）。"""
+    data = normalize_state(state)
+    if species_id not in BY_ID:
+        return data
+    nickname = str(nickname or "").strip()[:NICKNAME_MAX]
+    names = dict(data["names"])
+    if nickname:
+        names[species_id] = nickname
+    else:
+        names.pop(species_id, None)
+    data["names"] = names
+    return data
 
 
 def switch_to(state: dict | None, species_id: str, today: str) -> dict:
@@ -143,7 +177,7 @@ def switch_to(state: dict | None, species_id: str, today: str) -> dict:
     history = [r for r in data["history"] if r["date"] != today]
     history.append({"date": today, "id": species_id})
     history.sort(key=lambda r: r["date"])
-    return {"selected": species_id, "history": history}
+    return {"selected": species_id, "history": history, "names": data["names"]}
 
 
 def _as_date(text: str):
@@ -255,6 +289,7 @@ def compute(records: list[dict], today: str, state: dict | None = None) -> Compa
     return _build(
         species, int(row["exp"]), int(row["sessions"]),
         selected=True, unlocked=True, unlock_label=species.unlock_label,
+        nickname=data["names"].get(species.id, ""),
         mood=mood, mood_icon=mood_icon, days_since=days_since, streak=streak,
         message=_message(days_since, streak, int(row["sessions"])),
     )
@@ -272,7 +307,7 @@ def collection(records: list[dict], today: str, state: dict | None = None) -> li
         out.append(_build(
             s, int(row["exp"]), int(row["sessions"]),
             unlocked=s.id in unlocked, unlock_label=s.unlock_label,
-            selected=s.id == selected,
+            selected=s.id == selected, nickname=data["names"].get(s.id, ""),
         ))
     return out
 
@@ -291,4 +326,5 @@ def _days_since_last(records: list[dict], today: str) -> int:
 def summary_line(c: Companion) -> str:
     """リマインドなどに1行で添える成長報告。"""
     tail = "（最終段階）" if c.is_max else f"（次の姿まであと {c.exp_for_next}）"
-    return f"{c.icon} {c.name}｜Lv.{c.stage} / {c.stage_count}{tail}"
+    label = f"{c.nickname}・{c.name}" if c.nickname else c.name
+    return f"{c.icon} {label}｜Lv.{c.stage} / {c.stage_count}{tail}"

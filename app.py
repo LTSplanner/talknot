@@ -1159,7 +1159,20 @@ def _render_companion(user: dict) -> None:
         records = storage.list_evaluations(email)
         today = reminders.today_jst_str()
         state = storage.get_companion_state(email)
-        components.companion_card(companion.compute(records, today, state))
+        me = companion.compute(records, today, state)
+        components.companion_card(me)
+
+        # 名前をつけると「自分の相棒」になる。付けるまではそっと誘う。
+        with st.expander(f"✏️ {me.display_name} に名前をつける", expanded=False):
+            with st.form("companion_name", clear_on_submit=False):
+                nick = st.text_input(
+                    "名前", value=me.nickname,
+                    max_chars=companion.NICKNAME_MAX,
+                    placeholder="例）ぴよ太　※空にすると姿の名前に戻ります")
+                if st.form_submit_button("この名前にする"):
+                    storage.set_companion_state(
+                        email, companion.rename(state, me.species_id, nick))
+                    st.rerun()
 
         with st.expander("🧸 相棒図鑑（育てる子を選ぶ）", expanded=False):
             def _switch(species_id: str) -> None:

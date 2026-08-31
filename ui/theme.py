@@ -233,6 +233,18 @@ html, body, [class*="css"] {{
         width: 100%; padding: 0.7rem 1.2rem; font-size: 1rem;
     }}
 }}
+
+/* 相棒キャラのドット絵アニメ（2コマをパタパタ切り替える・昔のゲームの動き） */
+@keyframes tk-pixel-a {{ 0%, 49.9% {{ opacity: 1; }} 50%, 100% {{ opacity: 0; }} }}
+@keyframes tk-pixel-b {{ 0%, 49.9% {{ opacity: 0; }} 50%, 100% {{ opacity: 1; }} }}
+.tk-pixel {{ display: block; image-rendering: pixelated; }}
+.tk-pixel .f0 {{ animation: tk-pixel-a 1.1s steps(1, end) infinite; }}
+.tk-pixel .f1 {{ animation: tk-pixel-b 1.1s steps(1, end) infinite; }}
+/* 動きが苦手な人・省電力設定では止める */
+@media (prefers-reduced-motion: reduce) {{
+    .tk-pixel .f0 {{ animation: none; opacity: 1; }}
+    .tk-pixel .f1 {{ animation: none; opacity: 0; }}
+}}
 </style>
 """
 
