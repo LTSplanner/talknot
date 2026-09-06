@@ -140,6 +140,34 @@ flowchart LR
 - **③は増え続ける生の知恵**。人が書く余裕はないのでAIに集めさせる
 - **④は精度の問題**。「入隅」を「入り墨」と誤変換された実例があり、辞書で潰しています
 
+### ナレッジの実際の置き場所（このアプリが読んでいる先）
+
+「どこを直せばAIの答えが変わるか」が分かるように、実物の場所を書いておきます。
+リンク先を開くには、それぞれの共有権限が必要です。
+
+| 層 | 実物 | 場所 |
+|---|---|---|
+| ① 模範トーク（商材別・14タブ） | スプレッドシート | [1bUrsQxKIg7D…](https://docs.google.com/spreadsheets/d/1bUrsQxKIg7DZc-DANvHRqR4ygeEQEOvckZTpeGlmyEs/) |
+| ① 模範トーク（説明トーク部品別・22タブ） | スプレッドシート | [1A92RANfvc9z…](https://docs.google.com/spreadsheets/d/1A92RANfvc9zQz18b9aG4fnSlurKAqBVr0iWAzGSAX1k/) |
+| ② 社内ナレッジ資料（商品・料金・FAQ） | Driveフォルダ | [15Q4Ei08Xubf…](https://drive.google.com/drive/folders/15Q4Ei08Xubfib_0T2HcwYpdk93BDudl8) |
+| ③ 実践ナレッジの元（商談議事録） | Driveフォルダ | [14yefycrO6yl…](https://drive.google.com/drive/folders/14yefycrO6ylPVT0LAqbh10HjrDV-9FDd) |
+| ④ 用語集・誤変換辞書 | コード内 | `config/settings.py`（`INDUSTRY_GLOSSARY` / `TRANSCRIPT_FIXES`） |
+| 商談・ロープレの録画 | 各自のDrive（Meet録画） | サービスアカウントが**読み取り専用**で参照 |
+| 保存先（評価履歴・ナレッジ） | スプレッドシート | IDは Secrets 管理（`KNOWLEDGE_SHEET_ID`） |
+| 利用ログ（LTS共通） | スプレッドシート | [17et2dnkgLsx…](https://docs.google.com/spreadsheets/d/17et2dnkgLsxpb9cdbKgDRmmkI5hB_LYyMYtqxZhIhUU/) |
+
+取り込みの入口：
+
+| やりたいこと | 操作 |
+|---|---|
+| 模範トークを更新した | `scripts/import_talk_scripts.py` を実行（色付きセルを【見出し】として構造化して取り込む） |
+| ロープレの台本に反映したい | GitHub Actions の `rebuild-scenarios` を手動実行 |
+| 社内ナレッジ資料を追加した | アプリの管理者画面のボタンから取り込み |
+| 議事録を追加した | 何もしなくてよい（毎日自動で抽出される） |
+
+**フォルダIDは `config/settings.py` に既定値として書いてあります**（鍵ではないので
+コードに入れて構いません）。差し替えるときは `.env` / Secrets で上書きできます。
+
 ### 派生して作られるもの
 
 ①〜④から、AIが次の2つを自動生成します（人が確認して直せます）。

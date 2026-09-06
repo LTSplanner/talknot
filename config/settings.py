@@ -231,7 +231,8 @@ FEATURE_OBJECTION_DRILL = _bool_env("FEATURE_OBJECTION_DRILL", True)
 
 # 応用②「ご意見箱」。プランナーからの要望・不具合を集めて共有シートに残す。
 # まず先行公開の対象者に見てもらい、問題なければ True にして全員へ。
-FEATURE_FEEDBACK_BOX = _bool_env("FEATURE_FEEDBACK_BOX", False)
+# 先行公開で確認済みのため全員に公開（2026-09-06）。
+FEATURE_FEEDBACK_BOX = _bool_env("FEATURE_FEEDBACK_BOX", True)
 
 # 応用③「相棒キャラクター」。ロープレを続けると育つ。毎日会いに行く理由をつくる。
 # 先行公開で確認済みのため全員に公開（2026-09-06）。
