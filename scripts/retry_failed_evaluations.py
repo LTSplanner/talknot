@@ -130,6 +130,36 @@ def _give_up(rec: dict, payload: dict | None) -> None:
         rec.get("label", ""), retry_payload="")
 
 
+def verdict(rec: dict) -> str:
+    """その失敗を今後どうすれば片づくかを一言で返す（一覧表示用）。"""
+    from core import auto_eval, badges
+
+    if _payload_of(rec):
+        return "自動でやり直します（録り直し不要）"
+    if badges.is_roleplay(rec):
+        return "録音が残っていないため、もう一度実施が必要"
+    if auto_eval.is_first_meeting(rec.get("label", "")):
+        return "初回商談なので自動評価が再挑戦します"
+    return "対象外の商談なので、必要なら画面から手動で再評価"
+
+
+def _report(records: list[dict]) -> None:
+    """失敗している記録を人ごとに並べ、それぞれ今後どうなるかを表示する。"""
+    from core import progress
+
+    visible = progress.hide_resolved_errors(records)
+    failed = [r for r in visible if r.get("status") in ("error", "processing")]
+    print(f"\n--- 未完了の記録 {len(failed)} 件（後で成功した分は除く）---")
+    by_person: dict[str, list[dict]] = {}
+    for rec in sorted(failed, key=lambda r: r.get("saved_at", "")):
+        by_person.setdefault(rec.get("user_email", "（不明）"), []).append(rec)
+    for email, rows in sorted(by_person.items()):
+        print(f"  {email}: {len(rows)} 件")
+        for rec in rows:
+            print(f"    {rec.get('saved_at')} {rec.get('label')[:40]}"
+                  f"\n      → {verdict(rec)}")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="失敗した評価を後からやり直す")
     ap.add_argument("--dry-run", action="store_true", help="対象の確認だけ")
@@ -161,6 +191,7 @@ def main() -> int:
         for rec in targets[: args.limit]:
             print(f"  [dry-run] {rec.get('saved_at')} {rec.get('user_email')} "
                   f"{rec.get('label')}")
+        _report(records)
         return 0
 
     done = 0
