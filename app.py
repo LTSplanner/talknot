@@ -34,7 +34,7 @@ except Exception:
 
 from auth import google_oauth, persist, session  # noqa: E402
 from config import settings  # noqa: E402
-from core import meeting_context  # noqa: E402
+from core import audio_prep, meeting_context  # noqa: E402
 from core.progress import hide_resolved_errors, latest_one_point  # noqa: E402
 from core.models import EvaluationResult  # noqa: E402
 from services import (  # noqa: E402
@@ -1337,7 +1337,10 @@ def render_roleplay_tab(user: dict) -> None:
             st.rerun()
 
         if rec is not None and rec_key not in processed:
-            audio.append(rec.getvalue())
+            # スマホは 48kHz ステレオで録るため 40秒で数MBになる。5ターン抱えると
+            # Streamlit Cloud（メモリ1GB）が評価中に落ちて「時間内に完了しません
+            # でした」になるので、録った直後に 16kHz モノラルへ落としてから持つ。
+            audio.append(audio_prep.shrink(rec.getvalue()))
             lines_rec.append(customer_line)
             used.append(bool(practice or st.session_state.get(f"rp_hint_{turn}")))
             processed.append(rec_key)  # この録音ウィジェットは処理済み（二重進行を防ぐ）

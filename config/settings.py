@@ -234,11 +234,12 @@ FEATURE_OBJECTION_DRILL = _bool_env("FEATURE_OBJECTION_DRILL", True)
 FEATURE_FEEDBACK_BOX = _bool_env("FEATURE_FEEDBACK_BOX", False)
 
 # 応用③「相棒キャラクター」。ロープレを続けると育つ。毎日会いに行く理由をつくる。
-FEATURE_COMPANION = _bool_env("FEATURE_COMPANION", False)
+# 先行公開で確認済みのため全員に公開（2026-09-06）。
+FEATURE_COMPANION = _bool_env("FEATURE_COMPANION", True)
 
 # 応用④「ロープレの揺らぎ」。お客様カード・アドリブ・今日のミッションを毎回引き直し、
-# 台本を暗記しても読み上げでは終われないようにする。
-FEATURE_ROLEPLAY_VARIETY = _bool_env("FEATURE_ROLEPLAY_VARIETY", False)
+# 台本を暗記しても読み上げでは終われないようにする。相棒と同時に全員へ公開（2026-09-06）。
+FEATURE_ROLEPLAY_VARIETY = _bool_env("FEATURE_ROLEPLAY_VARIETY", True)
 
 # 機能名 → フラグ値の対応表（未知の名前は False）。
 _FEATURE_FLAGS = {

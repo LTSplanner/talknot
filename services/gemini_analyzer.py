@@ -439,13 +439,24 @@ def analyze_roleplay(
         scenario_lines, talk_script, knowledge_base, focus, persona,
         meeting_context, previous_one_point)
 
+    # 合計が大きいときは、リクエストに埋め込まず Files API 経由で送る。
+    # 埋め込みは約20MBが上限で、超えると評価そのものが失敗する（スマホの長い録音で起きる）。
+    total = sum(len(d or b"") for d in audio_turns)
+    use_files = total > _INLINE_AUDIO_LIMIT
+
     contents: list = []
+    uploaded_names: list[str] = []
     for i, data in enumerate(audio_turns, 1):
         if not data:
             continue
         contents.append(f"--- T{i}（お客様「{scenario_lines[i-1]}」への応答）---"
                         if i <= len(scenario_lines) else f"--- T{i} ---")
-        contents.append(types.Part.from_bytes(data=data, mime_type=mime_type))
+        if use_files:
+            part, name = _upload_audio_part(client, data, mime_type)
+            contents.append(part)
+            uploaded_names.append(name)
+        else:
+            contents.append(types.Part.from_bytes(data=data, mime_type=mime_type))
     contents.append(prompt)
 
     cfg = types.GenerateContentConfig(
@@ -454,12 +465,46 @@ def analyze_roleplay(
         thinking_config=types.ThinkingConfig(thinking_budget=_THINKING_BUDGET),
     )
     try:
-        resp = _generate_retrying(client, contents, cfg)
-        data = _loads_lenient(resp.text)
-    except json.JSONDecodeError:
-        resp = _generate_retrying(client, contents + [_STRICT_JSON], cfg)
-        data = _loads_lenient(resp.text, repair=True)
+        try:
+            resp = _generate_retrying(client, contents, cfg)
+            data = _loads_lenient(resp.text)
+        except json.JSONDecodeError:
+            resp = _generate_retrying(client, contents + [_STRICT_JSON], cfg)
+            data = _loads_lenient(resp.text, repair=True)
+    finally:
+        _cleanup_files(client, uploaded_names)
     return EvaluationResult.from_dict(data)
+
+
+# リクエストに直接埋め込める音声の合計サイズ。超えたら Files API に切り替える。
+_INLINE_AUDIO_LIMIT = 8 * 1024 * 1024
+
+
+def _upload_audio_part(client: genai.Client, data: bytes, mime_type: str):
+    """録音1件を Files API へ上げて Part を返す（大きい録音でも通るように）。"""
+    suffix = ".wav" if "wav" in mime_type else ".bin"
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+        tmp.write(data)
+        path = tmp.name
+    try:
+        uploaded = _wait_until_active(client, client.files.upload(file=path))
+    finally:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+    return types.Part(file_data=types.FileData(
+        file_uri=uploaded.uri, mime_type=getattr(uploaded, "mime_type", mime_type))
+    ), uploaded.name
+
+
+def _cleanup_files(client: genai.Client, names: list[str]) -> None:
+    """上げた音声を消す（残しても48時間で消えるが、置きっぱなしにしない）。"""
+    for name in names:
+        try:
+            client.files.delete(name=name)
+        except Exception:  # noqa: BLE001 消せなくても評価結果には影響しない
+            pass
 
 
 _REFINE_PROMPT = (
