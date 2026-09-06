@@ -373,9 +373,13 @@ def main() -> int:
     # 「s.kageyamaさん」ではなく「景山冴香さん」と呼びかける（表示名が取れた人だけ）。
     names = _display_names(missed, sa_info)
     # 「今日やれば◯日連続」を添えるため、今つながっている連続日数を人ごとに出す。
+    # 連続日数は「練習した日」で数える（評価がAI側の都合で失敗した日も含める）。
+    # やったのに記録が途切れると、本人の負担だけが残ってしまう。
+    from core import companion
+
     streaks = {
-        email: badges.current_day_streak(
-            [r for r in records if r.get("user_email") == email], "roleplay", today)
+        email: companion.practice_streak(
+            [r for r in records if r.get("user_email") == email], today)
         for email in missed
     }
     # 相棒（たまごっち）の成長報告を添える。送る相手＝出勤日の人だけなので、

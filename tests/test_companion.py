@@ -185,9 +185,36 @@ class TestRobustness:
         meetings = [dict(r, label="🏠商談｜〇〇様") for r in _records(30)]
         assert companion.compute(meetings, _day(30)).exp == 0
 
-    def test_unfinished_records_are_ignored(self):
-        pending = [dict(r, status="processing") for r in _records(30)]
-        assert companion.compute(pending, _day(30)).exp == 0
+    def test_practice_counts_even_when_the_evaluation_failed(self):
+        """やったのにAI側の都合で失敗した日も、練習した日として数える。
+
+        実際に「昨日も今日もロープレしたのに、評価が失敗して相棒に
+        『2日ぶりですね』と言われた」という報告があった（2026-09-06）。
+        """
+        failed = [dict(r, status="error", result=None, error="high demand")
+                  for r in _records(3)]
+        c = companion.compute(failed, _day(2))
+        assert c.sessions == 3
+        assert c.exp > 0
+        assert c.streak == 3
+        assert "ぶり" not in c.message
+
+    def test_unfinished_records_still_count_as_practice(self):
+        pending = [dict(r, status="processing") for r in _records(5)]
+        assert companion.compute(pending, _day(4)).sessions == 5
+
+    def test_a_failed_day_earns_less_than_a_good_day(self):
+        """点数が出ていない日に、良い回のおまけまでは付けない。"""
+        good = companion.compute(_records(3, good_every=1), _day(2)).exp
+        failed = companion.compute(
+            [dict(r, status="error", result=None) for r in _records(3)], _day(2)).exp
+        assert 0 < failed < good
+
+    def test_retrying_a_failed_session_does_not_double_count(self):
+        """同じ日に失敗と成功が混在しても、練習回数を水増ししない。"""
+        day = _records(1)
+        mixed = [dict(day[0], status="error", result=None), day[0]]
+        assert companion.compute(mixed, _day(0)).sessions == 1
 
     def test_sheet_style_records_also_count(self):
         """シートから読んだ生JSON（result_json）でも育つ。"""

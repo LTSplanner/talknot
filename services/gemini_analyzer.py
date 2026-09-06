@@ -168,7 +168,7 @@ def _target_fps(path: str) -> float:
 
 
 # 429（無料枠のレート上限）で待って再試行する秒数。分あたり上限は待てば復旧する。
-_RATE_LIMIT_WAITS = [30, 60]
+_RATE_LIMIT_WAITS = [30, 60, 120]
 
 
 def _is_rate_limit(exc: Exception) -> bool:
@@ -183,11 +183,17 @@ def _is_transient(exc: Exception) -> bool:
     長い応答の生成中に接続が切れることがあり、実際に長尺の商談3件が
     "Server disconnected without sending a response." で失敗した。
     内容の問題ではないので、待って投げ直せば通ることが多い。
+
+    モデルの混雑（"This model is currently experiencing high demand."）も同じ扱い。
+    この文面にはステータス番号が入らないことがあり、番号だけを見ていたため
+    再試行されずにロープレ1件がそのまま失敗した（2026-09-06）。
     """
     s = str(exc).lower()
     return any(k in s for k in (
         "server disconnected", "connection reset", "connection aborted",
         "remote end closed", "timed out", "timeout", "502", "503", "504",
+        "high demand", "overloaded", "unavailable", "try again later",
+        "internal error", "internal server error",
     ))
 
 

@@ -200,24 +200,41 @@ def owner_on(history: list[dict], date: str) -> str:
 
 # --- 経験値の集計 ------------------------------------------------------------ #
 
-def _roleplay_days(records: list[dict]) -> list[tuple[str, bool]]:
-    """ロープレ履歴を (日付, 良い回か) の古い順リストにする。"""
+def _practice_by_day(records: list[dict]) -> dict[str, dict]:
+    """日ごとの練習を集める。{日付: {"done": [良い回か…], "tried": 失敗・処理中の数}}
+
+    **評価が失敗した日も「練習した日」として数える。** 実際にロープレはやったのに、
+    AI側の混雑やサーバー再起動で評価が失敗しただけで相棒が「2日ぶりですね」と言い、
+    連続記録も途切れてしまう。やった事実は本人のものなので、AIの都合で消さない。
+    """
     from core import badges
 
-    rows = [
-        r for r in (records or [])
-        if r.get("status") == "done" and badges.is_roleplay(r)
-        and badges.result_of(r) is not None
-    ]
-    rows.sort(key=lambda r: str(r.get("saved_at", "")))
-    out = []
-    for r in rows:
+    by_day: dict[str, dict] = {}
+    for r in records or []:
+        if not badges.is_roleplay(r):
+            continue
         day = str(r.get("saved_at", ""))[:10]
         if not _as_date(day):
             continue
-        total = badges._total(badges.result_of(r) or {})
-        out.append((day, total >= badges.HIGH_SCORE_TOTAL))
-    return out
+        row = by_day.setdefault(day, {"done": [], "tried": 0})
+        result = badges.result_of(r)
+        if r.get("status") == "done" and result is not None:
+            row["done"].append(badges._total(result) >= badges.HIGH_SCORE_TOTAL)
+        else:
+            row["tried"] += 1
+    return by_day
+
+
+def _day_sessions(row: dict) -> int:
+    """その日の練習回数。失敗しかない日は1回とみなす（再評価の重複で増やさない）。"""
+    return len(row["done"]) or (1 if row["tried"] else 0)
+
+
+def _day_exp(row: dict) -> int:
+    """その日に入る経験値。失敗した日も練習ぶんは入る（点数が無いので加点は無し）。"""
+    if row["done"]:
+        return sum(EXP_PER_SESSION + (EXP_PER_GOOD if good else 0) for good in row["done"])
+    return EXP_PER_SESSION if row["tried"] else 0
 
 
 def _best_streak(days: list[str]) -> int:
@@ -230,14 +247,17 @@ def _best_streak(days: list[str]) -> int:
 def exp_table(records: list[dict], state: dict) -> dict[str, dict]:
     """相棒ごとの {経験値, 回数} を返す。選ばれていた期間の実績だけが入る。"""
     table: dict[str, dict] = {s.id: {"exp": 0, "sessions": 0, "days": []} for s in SPECIES}
-    for day, good in _roleplay_days(records):
+    for day, row in sorted(_practice_by_day(records).items()):
+        sessions = _day_sessions(row)
+        if not sessions:
+            continue
         owner = owner_on(state["history"], day)
-        row = table.setdefault(owner, {"exp": 0, "sessions": 0, "days": []})
-        row["exp"] += EXP_PER_SESSION + (EXP_PER_GOOD if good else 0)
-        row["sessions"] += 1
-        row["days"].append(day)
-    for row in table.values():
-        row["exp"] += _best_streak(row["days"]) * EXP_PER_STREAK_DAY
+        acc = table.setdefault(owner, {"exp": 0, "sessions": 0, "days": []})
+        acc["exp"] += _day_exp(row)
+        acc["sessions"] += sessions
+        acc["days"].append(day)
+    for acc in table.values():
+        acc["exp"] += _best_streak(acc["days"]) * EXP_PER_STREAK_DAY
     return table
 
 
@@ -281,9 +301,7 @@ def compute(records: list[dict], today: str, state: dict | None = None) -> Compa
     species = BY_ID.get(data["selected"], BY_ID[DEFAULT_ID])
     row = table.get(species.id, {"exp": 0, "sessions": 0})
 
-    from core import badges
-
-    streak = badges.current_day_streak(records, "roleplay", today)
+    streak = practice_streak(records, today)
     days_since = _days_since_last(records, today)
     mood, mood_icon = _mood_for(days_since)
     return _build(
@@ -312,9 +330,34 @@ def collection(records: list[dict], today: str, state: dict | None = None) -> li
     return out
 
 
+def practice_streak(records: list[dict], today: str) -> int:
+    """いま続いている連続練習日数。評価が失敗した日も1日として数える。
+
+    土日をまたいでもつながる（badges と同じ判定を使う）。最後の練習が今日でも
+    直前の営業日でもなければ 0。
+    """
+    from core import badges
+
+    today_d = _as_date(today)
+    if not today_d:
+        return 0
+    days = sorted(d for d in _practice_by_day(records) if _as_date(d) <= today_d)
+    if not days:
+        return 0
+    dates = [_as_date(d) for d in days]
+    if dates[-1] != today_d and not badges._is_connected(dates[-1], today_d):
+        return 0
+    streak = 1
+    for prev, cur in zip(reversed(dates[:-1]), reversed(dates[1:])):
+        if not badges._is_connected(prev, cur):
+            break
+        streak += 1
+    return streak
+
+
 def _days_since_last(records: list[dict], today: str) -> int:
     """最後にロープレをした日から何日経ったか。一度も無ければ -1。"""
-    days = [d for d, _ in _roleplay_days(records)]
+    days = list(_practice_by_day(records))
     if not days:
         return -1
     last, now = _as_date(max(days)), _as_date(today)
