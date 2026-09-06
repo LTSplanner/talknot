@@ -11,6 +11,7 @@ GOOGLE_CLIENT_ID/SECRET が設定されていれば本物の Google 認証を、
 from __future__ import annotations
 
 import gc
+import json
 import os
 import random
 import shutil
@@ -955,11 +956,25 @@ def _roleplay_worker(
     audio_turns: list, scenario_lines: list, focus: str | None = None,
     planner_name: str = "",
 ) -> None:
-    """1人ロープレの録音をまとめて1回だけ Gemini で評価する（背景実行）。"""
+    """1人ロープレの録音をまとめて1回だけ Gemini で評価する（背景実行）。
+
+    先に録音を Gemini へ預けて「やり直し用の材料」を記録に残す。こうしておくと、
+    AIの混雑やアプリの再起動で失敗しても、**録り直さずに後から自動で評価できる**。
+    せっかく練習したのに「やっていないこと」にされる負担をなくすため。
+    """
+    payload = ""
     try:
         with _ANALYSIS_SLOTS:
+            audio_files = gemini_analyzer.upload_roleplay_audio(audio_turns)
+            payload = json.dumps({
+                "kind": "roleplay", "audio_files": audio_files,
+                "scenario_lines": scenario_lines, "focus": focus,
+                "planner_name": planner_name, "attempts": 0,
+            }, ensure_ascii=False)
+            storage.start_evaluation(user_email, job_id, label, retry_payload=payload)
+
             result = gemini_analyzer.analyze_roleplay(
-                audio_turns, scenario_lines,
+                [], scenario_lines,
                 storage.get_talk_script() or None,
                 storage.get_knowledge_base(),
                 focus=focus,
@@ -968,12 +983,15 @@ def _roleplay_worker(
                 meeting_context=meeting_context.build_meeting_context("", planner_name),
                 # 商談とロープレは1本の線でつなぐ（ロープレで練習した1点を次の商談で見る）。
                 previous_one_point=_previous_one_point(user_email),
+                audio_files=audio_files,
             )
         storage.finish_evaluation(user_email, job_id, result, label)
         storage.append_knowledge(result.knowledge)
         usage_log.log("roleplay", user_email=user_email, ok=True, source="streamlit-bg")
     except Exception as exc:  # noqa: BLE001
-        storage.fail_evaluation(user_email, job_id, _friendly_gemini_error(exc), label)
+        # やり直しの材料を残したまま失敗にする（定期実行が後から拾って完了させる）。
+        storage.fail_evaluation(user_email, job_id, _friendly_gemini_error(exc), label,
+                                retry_payload=payload)
         usage_log.log("roleplay", user_email=user_email, ok=False, source="streamlit-bg")
     finally:
         gc.collect()

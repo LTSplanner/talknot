@@ -228,7 +228,8 @@ def load_feedback() -> list[dict]:
 
 
 _EVAL_TAB = "Evaluations"
-_EVAL_HEADER = ["job_id", "user_email", "saved_at", "status", "label", "result_json", "error"]
+_EVAL_HEADER = ["job_id", "user_email", "saved_at", "status", "label", "result_json",
+                "error", "retry_payload"]
 
 # スプレッドシートの1セルに入る上限は5万文字。超えると書き込み全体が 400 で失敗する。
 # 商談を区間に分けて解析するようになり、指摘が80件を超えるとこの上限に届く。
@@ -276,7 +277,7 @@ def load_evaluations() -> list[dict]:
         resp = (
             svc.spreadsheets()
             .values()
-            .get(spreadsheetId=_eval_sheet_id(), range=f"{_EVAL_TAB}!A2:G")
+            .get(spreadsheetId=_eval_sheet_id(), range=f"{_EVAL_TAB}!A2:H")
             .execute()
         )
     except Exception:
@@ -296,6 +297,8 @@ def load_evaluations() -> list[dict]:
             "label": c(4),
             "result_json": c(5),
             "error": c(6),
+            # 失敗しても後からやり直せるように、入力（音声のファイルURI等）を持たせる。
+            "retry_payload": c(7),
         })
     return out
 
@@ -320,6 +323,7 @@ def save_evaluations(items: list[dict]) -> None:
             it.get("label", ""),
             _fit_cell(it.get("result_json", "")),
             it.get("error", ""),
+            _fit_cell(it.get("retry_payload", "")),
         ]
         for it in items
     ]
@@ -333,7 +337,7 @@ def save_evaluations(items: list[dict]) -> None:
     # 2) 書けたあとで、はみ出した古い行だけを消す
     try:
         svc.spreadsheets().values().clear(
-            spreadsheetId=sid, range=f"{_EVAL_TAB}!A{len(values) + 1}:G"
+            spreadsheetId=sid, range=f"{_EVAL_TAB}!A{len(values) + 1}:H"
         ).execute()
     except Exception:  # noqa: BLE001 消し残りは次回の書き込みで解消する
         pass

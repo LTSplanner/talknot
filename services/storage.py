@@ -1168,6 +1168,7 @@ def _sheet_upsert_eval(record: dict) -> None:
 def _eval_record(
     user_email: str, job_id: str, status: str, label: str,
     result: EvaluationResult | None = None, error: str = "",
+    retry_payload: str = "",
 ) -> dict:
     return {
         "job_id": job_id,
@@ -1177,6 +1178,8 @@ def _eval_record(
         "label": label,
         "result_json": json.dumps(result.to_dict(), ensure_ascii=False) if result else "",
         "error": error,
+        # やり直しに必要な入力（音声のファイルURI・台本など）。完了したら空にする。
+        "retry_payload": retry_payload,
     }
 
 
@@ -1195,10 +1198,16 @@ def save_evaluation(user_email: str, result: EvaluationResult, label: str = "") 
     return job_id
 
 
-def start_evaluation(user_email: str, job_id: str, label: str = "") -> str:
-    """解析開始時に『処理中』レコードを作る。"""
+def start_evaluation(user_email: str, job_id: str, label: str = "",
+                     retry_payload: str = "") -> str:
+    """解析開始時に『処理中』レコードを作る。
+
+    retry_payload を渡しておくと、途中で失敗しても後から自動でやり直せる
+    （アプリが再起動して背景処理が消えても、記録さえ残っていれば復旧できる）。
+    """
     if _use_eval_sheets():
-        _sheet_upsert_eval(_eval_record(user_email, job_id, "processing", label))
+        _sheet_upsert_eval(_eval_record(user_email, job_id, "processing", label,
+                                        retry_payload=retry_payload))
         return job_id
     _write_eval(_eval_handle(user_email, job_id), {
         "user_email": user_email, "label": label,
@@ -1223,11 +1232,17 @@ def finish_evaluation(
 
 
 def fail_evaluation(
-    user_email: str, job_id: str, error: str, label: str = ""
+    user_email: str, job_id: str, error: str, label: str = "",
+    retry_payload: str = "",
 ) -> None:
-    """背景解析の失敗時に、同じレコードを『失敗』へ更新し、管理者へ通知する。"""
+    """背景解析の失敗時に、同じレコードを『失敗』へ更新し、管理者へ通知する。
+
+    retry_payload が残っていれば、定期実行（retry-evaluations）が拾って
+    後からやり直す。プランナーは録り直さなくてよい。
+    """
     if _use_eval_sheets():
-        _sheet_upsert_eval(_eval_record(user_email, job_id, "error", label, error=error))
+        _sheet_upsert_eval(_eval_record(user_email, job_id, "error", label, error=error,
+                                        retry_payload=retry_payload))
     else:
         _write_eval(_eval_handle(user_email, job_id), {
             "user_email": user_email, "label": label,

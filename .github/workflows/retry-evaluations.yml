@@ -1,0 +1,47 @@
+name: retry-evaluations
+
+# 失敗した評価を、後からやり直して完了させる。
+# ロープレはやったのにAIの混雑やアプリ再起動で評価だけ失敗した場合に、
+# 録り直さずに完了させるための保険。1回3件まで・30秒間隔で、混雑を悪化させない。
+#
+# 必要な GitHub Secrets（他のワークフローと同じもの）:
+#   KNOWLEDGE_SHEET_ID / KNOWLEDGE_SA_JSON / GEMINI_API_KEY
+
+on:
+  schedule:
+    - cron: "40 * * * *"      # 毎時40分ごろ
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "true なら対象の確認だけ"
+        type: boolean
+        default: false
+
+concurrency:
+  group: retry-evaluations
+  cancel-in-progress: false
+
+jobs:
+  retry:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Retry failed evaluations
+        env:
+          PYTHONPATH: .
+          PYTHONUNBUFFERED: "1"
+          KNOWLEDGE_SHEET_ID: ${{ secrets.KNOWLEDGE_SHEET_ID }}
+          KNOWLEDGE_SA_JSON: ${{ secrets.KNOWLEDGE_SA_JSON }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          python scripts/retry_failed_evaluations.py \
+            ${{ inputs.dry_run && '--dry-run' || '' }}

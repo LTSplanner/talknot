@@ -425,6 +425,24 @@ def _analyze_one(
             pass
 
 
+def upload_roleplay_audio(audio_turns: list[bytes],
+                          mime_type: str = "audio/wav") -> list[dict]:
+    """録音を先に Files API へ上げ、[{uri, mime}] を返す（48時間有効）。
+
+    先に上げておくと、評価が失敗しても**録り直さずに後からやり直せる**。
+    リクエスト本体も小さくなり、混雑時に通りやすい。
+    """
+    client = _client()
+    out: list[dict] = []
+    for data in audio_turns:
+        if not data:
+            continue
+        part, _ = _upload_audio_part(client, data, mime_type)
+        out.append({"uri": part.file_data.file_uri,
+                    "mime": part.file_data.mime_type or mime_type})
+    return out
+
+
 def analyze_roleplay(
     audio_turns: list[bytes],
     scenario_lines: list[str],
@@ -435,6 +453,8 @@ def analyze_roleplay(
     persona: dict | None = None,
     meeting_context: dict | None = None,
     previous_one_point: dict | None = None,
+    audio_files: list[dict] | None = None,
+    thinking_budget: int | None = None,
 ) -> EvaluationResult:
     """1人ロープレの録音（ターンごと）をまとめて1回の呼び出しで評価する。
 
@@ -445,30 +465,35 @@ def analyze_roleplay(
         scenario_lines, talk_script, knowledge_base, focus, persona,
         meeting_context, previous_one_point)
 
-    # 合計が大きいときは、リクエストに埋め込まず Files API 経由で送る。
-    # 埋め込みは約20MBが上限で、超えると評価そのものが失敗する（スマホの長い録音で起きる）。
-    total = sum(len(d or b"") for d in audio_turns)
-    use_files = total > _INLINE_AUDIO_LIMIT
-
+    # 音声は原則 Files API 経由（アップロード済みならその URI を使う）。
+    # リクエストへの埋め込みは約20MBが上限で、スマホの長い録音では超えてしまう。
     contents: list = []
     uploaded_names: list[str] = []
-    for i, data in enumerate(audio_turns, 1):
-        if not data:
-            continue
-        contents.append(f"--- T{i}（お客様「{scenario_lines[i-1]}」への応答）---"
-                        if i <= len(scenario_lines) else f"--- T{i} ---")
-        if use_files:
-            part, name = _upload_audio_part(client, data, mime_type)
-            contents.append(part)
-            uploaded_names.append(name)
-        else:
-            contents.append(types.Part.from_bytes(data=data, mime_type=mime_type))
+    if audio_files:
+        for i, f in enumerate(audio_files, 1):
+            contents.append(_turn_label(i, scenario_lines))
+            contents.append(types.Part(file_data=types.FileData(
+                file_uri=f["uri"], mime_type=f.get("mime") or mime_type)))
+    else:
+        total = sum(len(d or b"") for d in audio_turns)
+        use_files = total > _INLINE_AUDIO_LIMIT
+        for i, data in enumerate(audio_turns, 1):
+            if not data:
+                continue
+            contents.append(_turn_label(i, scenario_lines))
+            if use_files:
+                part, name = _upload_audio_part(client, data, mime_type)
+                contents.append(part)
+                uploaded_names.append(name)
+            else:
+                contents.append(types.Part.from_bytes(data=data, mime_type=mime_type))
     contents.append(prompt)
 
     cfg = types.GenerateContentConfig(
         response_mime_type="application/json",
         max_output_tokens=_MAX_OUTPUT_TOKENS,
-        thinking_config=types.ThinkingConfig(thinking_budget=_THINKING_BUDGET),
+        thinking_config=types.ThinkingConfig(
+            thinking_budget=thinking_budget or _THINKING_BUDGET),
     )
     try:
         try:
@@ -484,6 +509,11 @@ def analyze_roleplay(
 
 # リクエストに直接埋め込める音声の合計サイズ。超えたら Files API に切り替える。
 _INLINE_AUDIO_LIMIT = 8 * 1024 * 1024
+
+
+def _turn_label(i: int, scenario_lines: list[str]) -> str:
+    return (f"--- T{i}（お客様「{scenario_lines[i-1]}」への応答）---"
+            if i <= len(scenario_lines) else f"--- T{i} ---")
 
 
 def _upload_audio_part(client: genai.Client, data: bytes, mime_type: str):
