@@ -509,6 +509,8 @@ def sidebar(user: dict) -> None:
             st.markdown("🛡️ 管理者")
         elif settings.is_viewer(user.get("email")):
             st.markdown("👁️ 閲覧専用")
+        if settings.is_admin(user.get("email")):
+            st.caption(f"コード更新：{code_updated_at()}")
         st.divider()
         if st.button("ログアウト", use_container_width=True):
             from auth import persist, session
@@ -516,6 +518,30 @@ def sidebar(user: dict) -> None:
             persist.clear()  # 保存したログインCookieも消す
             session.logout()
             st.rerun()
+
+
+@st.cache_data(show_spinner=False)
+def code_updated_at() -> str:
+    """いま動いているコードがいつのものかを返す（管理者向けの表示）。
+
+    Streamlit Cloud は push しても再起動されるまで**古いコードのまま動き続ける**
+    ことがある。直したはずの不具合が直っていないとき、それが「直っていない」のか
+    「まだ反映されていない」のか区別できず、原因究明が遅れた（2026-09-06）。
+    配置されたファイルの更新時刻＝配置された時刻なので、それを出す。
+    """
+    import datetime as _dt
+
+    root = Path(__file__).resolve().parent.parent
+    newest = 0.0
+    for folder in ("", "core", "services", "ui", "config"):
+        for path in (root / folder).glob("*.py"):
+            try:
+                newest = max(newest, path.stat().st_mtime)
+            except OSError:
+                pass
+    if not newest:
+        return "不明"
+    return _dt.datetime.fromtimestamp(newest).strftime("%Y-%m-%d %H:%M")
 
 
 def feedback_kind_options() -> list[str]:

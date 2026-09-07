@@ -954,27 +954,19 @@ def _esc(text: str) -> str:
 def _roleplay_worker(
     job_id: str, user_email: str, label: str,
     audio_turns: list, scenario_lines: list, focus: str | None = None,
-    planner_name: str = "",
+    planner_name: str = "", audio_files: list | None = None,
+    retry_payload: str = "",
 ) -> None:
     """1人ロープレの録音をまとめて1回だけ Gemini で評価する（背景実行）。
 
-    先に録音を Gemini へ預けて「やり直し用の材料」を記録に残す。こうしておくと、
-    AIの混雑やアプリの再起動で失敗しても、**録り直さずに後から自動で評価できる**。
-    せっかく練習したのに「やっていないこと」にされる負担をなくすため。
+    録音は呼び出し側で先に Gemini へ預けてある（retry_payload に記録済み）。
+    ここで失敗しても、定期実行が後から**録り直しなしで**完了させる。
     """
-    payload = ""
     try:
         with _ANALYSIS_SLOTS:
-            audio_files = gemini_analyzer.upload_roleplay_audio(audio_turns)
-            payload = json.dumps({
-                "kind": "roleplay", "audio_files": audio_files,
-                "scenario_lines": scenario_lines, "focus": focus,
-                "planner_name": planner_name, "attempts": 0,
-            }, ensure_ascii=False)
-            storage.start_evaluation(user_email, job_id, label, retry_payload=payload)
-
             result = gemini_analyzer.analyze_roleplay(
-                [], scenario_lines,
+                audio_turns if not audio_files else [],
+                scenario_lines,
                 storage.get_talk_script() or None,
                 storage.get_knowledge_base(),
                 focus=focus,
@@ -991,7 +983,7 @@ def _roleplay_worker(
     except Exception as exc:  # noqa: BLE001
         # やり直しの材料を残したまま失敗にする（定期実行が後から拾って完了させる）。
         storage.fail_evaluation(user_email, job_id, _friendly_gemini_error(exc), label,
-                                retry_payload=payload)
+                                retry_payload=retry_payload)
         usage_log.log("roleplay", user_email=user_email, ok=False, source="streamlit-bg")
     finally:
         gc.collect()
@@ -1085,19 +1077,37 @@ def _start_roleplay_job(user: dict, scenario: dict, audio_turns: list,
                         scenario_lines: list | None = None) -> None:
     job_id = time.strftime("%Y%m%d_%H%M%S") + "_" + uuid.uuid4().hex[:6]
     label = f"🎙️1人ロープレ｜{scenario.get('title','')}"
-    storage.start_evaluation(user["email"], job_id, label)
     # 録音1件ごとに対応づけた お客様セリフ（往復含む）を優先。無い/長さ不一致なら
     # ターン第一声から再構成（後方互換のフォールバック）。
     if scenario_lines and len(scenario_lines) == len(audio_turns):
         lines = list(scenario_lines)
     else:
         lines = [t["customer"] for t in _session_turns(scenario)]
+
+    # **評価を始める前に、録音を Gemini へ預けて記録に残す。**
+    # 背景処理の中で預けていると、アプリが再起動した瞬間に材料ごと消えて
+    # 「やったのに、やっていないこと」になってしまう。ここで確定させておけば、
+    # この先どこで落ちても、定期実行が録り直しなしで完了させられる。
+    audio_files, payload = None, ""
+    try:
+        with st.spinner("録音を保存しています…"):
+            audio_files = gemini_analyzer.upload_roleplay_audio(audio_turns)
+            payload = json.dumps({
+                "kind": "roleplay", "audio_files": audio_files,
+                "scenario_lines": lines, "focus": scenario.get("focus"),
+                "planner_name": user.get("name", ""), "attempts": 0,
+            }, ensure_ascii=False)
+    except Exception:  # noqa: BLE001 預けられなくても、その場の評価は続ける
+        audio_files, payload = None, ""
+
+    storage.start_evaluation(user["email"], job_id, label, retry_payload=payload)
     threading.Thread(
         target=_roleplay_worker,
         kwargs=dict(job_id=job_id, user_email=user["email"], label=label,
                     audio_turns=audio_turns, scenario_lines=lines,
                     focus=scenario.get("focus"),
-                    planner_name=user.get("name", "")),
+                    planner_name=user.get("name", ""),
+                    audio_files=audio_files, retry_payload=payload),
         daemon=True,
     ).start()
 
