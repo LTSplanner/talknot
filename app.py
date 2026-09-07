@@ -659,6 +659,20 @@ _STATUS_BADGE = {
     "error": "❌ 失敗",
 }
 
+# AIの混雑などで一度失敗しても、録音を預けてあるものは後から自動で完了する。
+# それを「失敗」と赤字で見せると、練習そのものが無駄になったように受け取られる。
+_RETRY_BADGE = "🔄 やり直し中"
+_RETRY_NOTE = (
+    "AIが混み合っていたため、いま自動でやり直しています（**録り直しは不要**です）。"
+    "1時間ほどで結果が出ます。練習した記録は残っていますので、そのままで大丈夫です。"
+)
+
+
+def _status_badge(rec: dict) -> str:
+    if rec.get("will_retry") and rec.get("status") in ("error", "processing"):
+        return _RETRY_BADGE
+    return _STATUS_BADGE.get(rec.get("status", "done"), "✅ 完了")
+
 
 def _render_practice_overview(all_records: list[dict]) -> None:
     """管理者向け：誰が・どれだけ・いつロープレしたかの実施状況サマリ。"""
@@ -780,12 +794,14 @@ def _render_record_list(records: list[dict], key: str) -> None:
         return
     for i, rec in enumerate(records):
         status = rec.get("status", "done")
-        badge = _STATUS_BADGE.get(status, "✅ 完了")
+        badge = _status_badge(rec)
         sc = _avg_score(rec.get("result"))
         sc_tag = f"　{sc:.1f}/5" if sc is not None else ""
         title = str(rec.get("label", "")).replace("🎙️1人ロープレ｜", "")
         with st.expander(f"{badge}{sc_tag}　{rec.get('saved_at','')[5:16]}　{title[:26]}"):
-            if status == "error":
+            if rec.get("will_retry") and status in ("error", "processing"):
+                st.info(_RETRY_NOTE)
+            elif status == "error":
                 st.error(rec.get("error", "解析に失敗しました。"))
             elif rec.get("result"):
                 components.evaluation_result(EvaluationResult.from_dict(rec["result"]))
@@ -835,7 +851,7 @@ def render_history_tab(user: dict) -> None:
 
     for rec in records:
         status = rec.get("status", "done")
-        badge = _STATUS_BADGE.get(status, "✅ 完了")
+        badge = _status_badge(rec)
         owner = rec.get("user_email", "")
         who_tag = (
             f"　👤{owner.split('@')[0]}"
@@ -844,7 +860,9 @@ def render_history_tab(user: dict) -> None:
         with st.expander(
             f"{badge}　{rec.get('saved_at', '')}{who_tag}　{rec.get('label', '')}"
         ):
-            if status == "processing":
+            if rec.get("will_retry") and status in ("error", "processing"):
+                st.info(_RETRY_NOTE)
+            elif status == "processing":
                 st.caption("AI が解析中です。少し待って「🔄 最新の状態に更新」を押してください。")
             elif status == "error":
                 st.error(rec.get("error", "解析に失敗しました。"))

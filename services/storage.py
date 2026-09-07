@@ -1274,8 +1274,14 @@ _PROCESSING_TIMEOUT_MIN = 60
 
 
 def _apply_processing_timeout(rec: dict) -> dict:
-    """『処理中』が規定時間より古ければ、表示上は失敗（タイムアウト）に変える。"""
+    """『処理中』が規定時間より古ければ、表示上は失敗（タイムアウト）に変える。
+
+    やり直しの材料が残っているものは、定期実行が後から完了させるので
+    「失敗」にはせず『やり直し待ち』のままにする（練習が消えたように見せない）。
+    """
     if rec.get("status") != "processing":
+        return rec
+    if rec.get("will_retry"):
         return rec
     saved = rec.get("saved_at", "")
     try:
@@ -1304,6 +1310,8 @@ def list_all_evaluations() -> list[dict]:
                 "user_email": r.get("user_email", ""), "label": r.get("label", ""),
                 "saved_at": r.get("saved_at", ""), "status": r.get("status", "done"),
                 "error": r.get("error", ""), "result": None,
+                # 材料が残っていれば、失敗ではなく「やり直し待ち」として見せる
+                "will_retry": bool((r.get("retry_payload") or "").strip()),
             }
             if r.get("result_json"):
                 try:
@@ -1348,6 +1356,8 @@ def list_evaluations(user_email: str) -> list[dict]:
                 "user_email": r["user_email"], "label": r.get("label", ""),
                 "saved_at": r.get("saved_at", ""), "status": r.get("status", "done"),
                 "error": r.get("error", ""), "result": None,
+                # 材料が残っていれば、失敗ではなく「やり直し待ち」として見せる
+                "will_retry": bool((r.get("retry_payload") or "").strip()),
             }
             if r.get("result_json"):
                 try:

@@ -541,7 +541,9 @@ def code_updated_at() -> str:
                 pass
     if not newest:
         return "不明"
-    return _dt.datetime.fromtimestamp(newest).strftime("%Y-%m-%d %H:%M")
+    # 動いているサーバーはUTCなので、日本時間に直して出す（9時間ずれて見えるため）。
+    jst = _dt.timezone(_dt.timedelta(hours=9))
+    return _dt.datetime.fromtimestamp(newest, jst).strftime("%Y-%m-%d %H:%M")
 
 
 def feedback_kind_options() -> list[str]:
