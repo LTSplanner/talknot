@@ -194,6 +194,24 @@ SHEETS_SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 # 将来「評価専用の別シート」に分けたくなったら、ここに別シートIDを設定するだけ。
 EVALUATIONS_SHEET_ID = os.getenv("EVALUATIONS_SHEET_ID", "")
 
+# --- 改善履歴（ご意見箱の要望を、いつ・どう直したかの進捗管理）---
+# 評価履歴とは別の専用スプレッドシート。ホストがここだけ見れば変更の経緯を追える。
+# 書き込みには、このシートを知識SAに「編集者」で共有しておく必要がある。
+IMPROVEMENT_SHEET_ID = os.getenv(
+    "IMPROVEMENT_SHEET_ID", "1T7nZtWioFBjJmX9kqTZTe0aCXkRYUmJzU1dMIT4eEmc"
+)
+# 全体の修正ログと、依頼者ごとの個別タブ。
+IMPROVEMENT_TAB = os.getenv("IMPROVEMENT_TAB", "修正ログ（全体）")
+IMPROVEMENT_PERSONAL_TABS = {
+    "s.kageyama@life-time-support.com": "修正ログ（影山さん）",
+}
+
+
+def improvement_tab_for(sender: str) -> str:
+    """その依頼者の個別タブ名。対象外なら空文字。"""
+    return IMPROVEMENT_PERSONAL_TABS.get((sender or "").strip().lower(), "")
+
+
 # --- Gemini ---
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 # 動画・音声解析に対応したモデル。.env で差し替え可能。

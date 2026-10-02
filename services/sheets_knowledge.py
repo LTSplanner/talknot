@@ -124,6 +124,73 @@ def append_reminder_log(date_str: str, emails: list[str]) -> None:
     ).execute()
 
 
+# ご意見箱に入った要望を、いつ・どう直したかの記録。ホストがこのタブだけ見れば
+# 「何がいつどう変わったか」を追える。依頼者ごとの控えも別タブに残す。
+_IMPROVE_HEADER = ["日付", "改善内容", "ビフォー", "アフター", "備考"]
+
+
+def _improve_sheet_id() -> str:
+    """改善履歴の保存先（専用スプレッドシート）。"""
+    return _cfg("IMPROVEMENT_SHEET_ID") or settings.IMPROVEMENT_SHEET_ID
+
+
+def personal_tab_for(sender: str) -> str:
+    """その依頼者の個別タブ名。対象外なら空文字。"""
+    return settings.improvement_tab_for(sender)
+
+
+def append_improvement(row: list[str], sender: str = "") -> list[str]:
+    """改善1件を追記する。書き込んだタブ名の一覧を返す。
+
+    追記のみで既存行は触らない（評価履歴で全消し事故があったため、
+    ここでも「消してから書く」処理は作らない）。
+    """
+    svc = _service()
+    sid = _improve_sheet_id()
+    written = []
+    for tab in [settings.IMPROVEMENT_TAB, personal_tab_for(sender)]:
+        if not tab:
+            continue
+        _ensure_tab(svc, tab, sheet_id=sid)
+        try:                                   # 見出し行が無ければ先に入れる
+            head = svc.spreadsheets().values().get(
+                spreadsheetId=sid, range=f"{tab}!A1:E1").execute()
+            if not head.get("values"):
+                svc.spreadsheets().values().update(
+                    spreadsheetId=sid, range=f"{tab}!A1",
+                    valueInputOption="RAW",
+                    body={"values": [_IMPROVE_HEADER]}).execute()
+        except Exception:  # noqa: BLE001 見出しが入らなくても記録は残す
+            pass
+        svc.spreadsheets().values().append(
+            spreadsheetId=sid, range=f"{tab}!A:E",
+            valueInputOption="RAW", insertDataOption="INSERT_ROWS",
+            body={"values": [row]}).execute()
+        written.append(tab)
+    return written
+
+
+def load_improvements(tab: str = "") -> list[dict]:
+    """改善履歴を新しい順で返す。読めなければ空。"""
+    try:
+        svc = _service()
+        resp = svc.spreadsheets().values().get(
+            spreadsheetId=_improve_sheet_id(),
+            range=f"{tab or settings.IMPROVEMENT_TAB}!A2:E").execute()
+    except Exception:  # noqa: BLE001 タブが無い初回など
+        return []
+    out = []
+    for r in resp.get("values", []):
+        def c(i):
+            return (r[i] if len(r) > i else "").strip()
+        if not c(1):
+            continue
+        out.append({"date": c(0), "what": c(1), "before": c(2),
+                    "after": c(3), "note": c(4)})
+    out.sort(key=lambda r: r["date"], reverse=True)
+    return out
+
+
 # 相棒キャラクター（たまごっち）の状態。保存するのは「誰が・どの子を選んでいるか」と
 # 「いつ乗り換えたか」だけ。経験値はロープレ履歴から毎回計算するので保存しない。
 _COMPANION_TAB = "Companion"

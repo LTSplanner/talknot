@@ -1,0 +1,59 @@
+name: log-improvement
+
+# ご意見箱の要望を「いつ・どう直したか」として改善履歴シートに1行追記する。
+# ご意見箱の投稿は自動では拾えないため、依頼を受けた側が手で実行する。
+#
+# 使い方：Actions タブ → log-improvement → Run workflow → 各欄を埋める
+#   sender に s.kageyama@life-time-support.com を入れると、
+#   「改善履歴（影山）」タブにも同じ行が残る。
+#
+# 必要な GitHub Secrets: KNOWLEDGE_SHEET_ID / KNOWLEDGE_SA_JSON
+
+on:
+  workflow_dispatch:
+    inputs:
+      what:
+        description: "改善内容（必須）"
+        required: true
+      before:
+        description: "ビフォー（直す前はどうだったか）"
+        required: false
+      after:
+        description: "アフター（直した後どうなったか）"
+        required: false
+      note:
+        description: "備考（依頼者・経緯など）"
+        required: false
+      sender:
+        description: "要望をくれた人のメール（個別タブに残したいとき）"
+        required: false
+      dry_run:
+        description: "true なら書き込まず内容の確認だけ"
+        type: boolean
+        default: false
+
+jobs:
+  log:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Append improvement row
+        env:
+          PYTHONPATH: .
+          PYTHONUNBUFFERED: "1"
+          KNOWLEDGE_SHEET_ID: ${{ secrets.KNOWLEDGE_SHEET_ID }}
+          KNOWLEDGE_SA_JSON: ${{ secrets.KNOWLEDGE_SA_JSON }}
+        run: |
+          python scripts/log_improvement.py \
+            --what "${{ inputs.what }}" \
+            --before "${{ inputs.before }}" \
+            --after "${{ inputs.after }}" \
+            --note "${{ inputs.note }}" \
+            --sender "${{ inputs.sender }}" \
+            ${{ inputs.dry_run && '--dry-run' || '' }}
