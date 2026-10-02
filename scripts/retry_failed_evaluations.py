@@ -104,6 +104,7 @@ def _retry_one(rec: dict, payload: dict) -> bool:
                 "", payload.get("planner_name", "")),
             audio_files=payload.get("audio_files"),
             thinking_budget=budget,
+            scenario_hints=payload.get("scenario_hints"),
         )
     except Exception as exc:  # noqa: BLE001 次の実行でまた拾う
         print(f"    → まだ失敗: {str(exc)[:120]}")

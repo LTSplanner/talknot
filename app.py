@@ -973,7 +973,7 @@ def _roleplay_worker(
     job_id: str, user_email: str, label: str,
     audio_turns: list, scenario_lines: list, focus: str | None = None,
     planner_name: str = "", audio_files: list | None = None,
-    retry_payload: str = "",
+    retry_payload: str = "", scenario_hints: list | None = None,
 ) -> None:
     """1人ロープレの録音をまとめて1回だけ Gemini で評価する（背景実行）。
 
@@ -994,6 +994,7 @@ def _roleplay_worker(
                 # 商談とロープレは1本の線でつなぐ（ロープレで練習した1点を次の商談で見る）。
                 previous_one_point=_previous_one_point(user_email),
                 audio_files=audio_files,
+                scenario_hints=scenario_hints,
             )
         storage.finish_evaluation(user_email, job_id, result, label)
         storage.append_knowledge(result.knowledge)
@@ -1091,16 +1092,36 @@ def _session_turns(scenario: dict) -> list[dict]:
     return turns
 
 
+def _hints_for(turns: list[dict], lines: list[str]) -> list[str]:
+    """録音1件ごとに対応する『お手本（カンペ）』を並べ直す。
+
+    往復ターンでは1ターンに複数の録音が対応するため、お客様セリフで突き合わせる。
+    見つからないものは空にして、無理に別のターンのカンペを当てない。
+    """
+    by_line = {str(t.get("customer", "")).strip(): str(t.get("hint", "")) for t in turns}
+    out = []
+    for i, line in enumerate(lines):
+        hint = by_line.get(str(line).strip(), "")
+        if not hint and i < len(turns):
+            hint = str(turns[i].get("hint", ""))
+        out.append(hint)
+    return out
+
+
 def _start_roleplay_job(user: dict, scenario: dict, audio_turns: list,
                         scenario_lines: list | None = None) -> None:
     job_id = time.strftime("%Y%m%d_%H%M%S") + "_" + uuid.uuid4().hex[:6]
     label = f"🎙️1人ロープレ｜{scenario.get('title','')}"
     # 録音1件ごとに対応づけた お客様セリフ（往復含む）を優先。無い/長さ不一致なら
     # ターン第一声から再構成（後方互換のフォールバック）。
+    turns = _session_turns(scenario)
     if scenario_lines and len(scenario_lines) == len(audio_turns):
         lines = list(scenario_lines)
     else:
-        lines = [t["customer"] for t in _session_turns(scenario)]
+        lines = [t["customer"] for t in turns]
+    # 各ターンの「お手本（カンペ）」も一緒に渡す。これが無いとAIは練習者が何を
+    # 言うべきだったか分からず、カンペどおりに言えても言い換えを指摘してしまう。
+    hints = _hints_for(turns, lines)
 
     # **評価を始める前に、録音を Gemini へ預けて記録に残す。**
     # 背景処理の中で預けていると、アプリが再起動した瞬間に材料ごと消えて
@@ -1112,7 +1133,8 @@ def _start_roleplay_job(user: dict, scenario: dict, audio_turns: list,
             audio_files = gemini_analyzer.upload_roleplay_audio(audio_turns)
             payload = json.dumps({
                 "kind": "roleplay", "audio_files": audio_files,
-                "scenario_lines": lines, "focus": scenario.get("focus"),
+                "scenario_lines": lines, "scenario_hints": hints,
+                "focus": scenario.get("focus"),
                 "planner_name": user.get("name", ""), "attempts": 0,
             }, ensure_ascii=False)
     except Exception:  # noqa: BLE001 預けられなくても、その場の評価は続ける
@@ -1123,7 +1145,7 @@ def _start_roleplay_job(user: dict, scenario: dict, audio_turns: list,
         target=_roleplay_worker,
         kwargs=dict(job_id=job_id, user_email=user["email"], label=label,
                     audio_turns=audio_turns, scenario_lines=lines,
-                    focus=scenario.get("focus"),
+                    scenario_hints=hints, focus=scenario.get("focus"),
                     planner_name=user.get("name", ""),
                     audio_files=audio_files, retry_payload=payload),
         daemon=True,

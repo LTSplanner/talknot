@@ -35,6 +35,58 @@ def _ja_johari(text: str) -> str:
 _SPEAKER_PREFIX = re.compile(r"^\s*[^「」\n]{1,16}[:：]\s*(?=「)")
 
 
+SCORE_MIN, SCORE_MAX = 1, 5
+
+
+def clamp_score(value: int) -> int:
+    """点数を 1〜5 に収める。
+
+    AIが「この単元では場面が無かった」項目に 0 を付けることがあり、
+    実際に 2/25 という評価が出てプランナーのやる気を削いだ（2026-09-16）。
+    0 は「評価不能」であって「最低評価」ではないので、最低点の 1 に寄せる。
+    """
+    try:
+        value = int(value)
+    except (TypeError, ValueError):
+        return SCORE_MIN
+    return max(SCORE_MIN, min(SCORE_MAX, value))
+
+
+# 相槌・つなぎ言葉。これだけの発話を「こう言えたら」と直しても練習にならない。
+_FILLER_WORDS = (
+    "はい", "ええ", "うん", "そうですね", "そうですよね", "なるほど", "確かに", "たしかに",
+    "ありがとうございます", "ありがとうございました", "承知しました", "分かりました",
+    "わかりました", "おっしゃる通りです", "おっしゃるとおりです", "そうなんです",
+    "はいはい", "ええええ", "あ、", "えっと", "あの",
+)
+_FILLER_STRIP = re.compile(r"[、。．，,.!！?？…・\s「」『』]+")
+_FILLER_WORDS = tuple(sorted(_FILLER_WORDS, key=len, reverse=True))
+
+
+def is_filler(text: str) -> bool:
+    """相槌だけの発話か（『こう言えたら』の対象から外す）。
+
+    実際に「はい」「そうですね」への Before/After が出て、話し方の練習に
+    ならないという指摘があった（2026-09-20）。
+
+    判定は**丸ごと相槌のときだけ**。長さでは切らない（「大丈夫ですよ」のような
+    短くても意味のある一言を落としてしまうため）。既知の相槌を端から剥がして、
+    残りが実質なくなるものだけを相槌とみなす。
+    """
+    rest = _FILLER_STRIP.sub("", text or "")
+    if not rest:
+        return True
+    changed = True
+    while changed:
+        changed = False
+        for w in _FILLER_WORDS:
+            if rest.startswith(w):
+                rest, changed = rest[len(w):], True
+            if rest.endswith(w):
+                rest, changed = rest[: -len(w)], True
+    return len(rest) <= 2          # 「ね」「よ」程度の残りは相槌とみなす
+
+
 def _strip_speaker(text: str) -> str:
     """before/after の先頭に付いた話者名（『◯◯:』）を取り除く。"""
     if not text:
@@ -364,9 +416,9 @@ class EvaluationResult:
 
         return CriterionScore(
             key=s.get("key", ""),
-            reference_score=_int(s.get("reference_score", s.get("score", 0))),
+            reference_score=clamp_score(_int(s.get("reference_score", s.get("score", 0)))),
             reference_comment=s.get("reference_comment", s.get("comment", "")),
-            sales_score=_int(s.get("sales_score", s.get("score", 0))),
+            sales_score=clamp_score(_int(s.get("sales_score", s.get("score", 0)))),
             sales_comment=s.get("sales_comment", s.get("comment", "")),
         )
 
@@ -484,8 +536,11 @@ class EvaluationResult:
                 if h.get("inferred_need")
             ]), settings.MAX_HIDDEN_NEEDS),
             # 商談の流れを追って読めるよう、必ず時系列に並べ替える。
-            feedback=_in_time_order(
-                [cls._parse_feedback(f) for f in data.get("feedback", [])]),
+            # 相槌だけの発話への「こう言えたら」は、話し方の練習にならないので捨てる。
+            feedback=_in_time_order([
+                fb for fb in (cls._parse_feedback(f) for f in data.get("feedback", []))
+                if not (fb.before and is_filler(fb.before))
+            ]),
             summary=data.get("summary", ""),
             knowledge=[
                 KnowledgeItem(

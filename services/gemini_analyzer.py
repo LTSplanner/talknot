@@ -455,6 +455,7 @@ def analyze_roleplay(
     previous_one_point: dict | None = None,
     audio_files: list[dict] | None = None,
     thinking_budget: int | None = None,
+    scenario_hints: list[str] | None = None,
 ) -> EvaluationResult:
     """1人ロープレの録音（ターンごと）をまとめて1回の呼び出しで評価する。
 
@@ -462,7 +463,7 @@ def analyze_roleplay(
     """
     client = _client()
     prompt = prompts.build_roleplay_prompt(
-        scenario_lines, talk_script, knowledge_base, focus, persona,
+        scenario_lines, talk_script, scenario_hints, knowledge_base, focus, persona,
         meeting_context, previous_one_point)
 
     # 音声は原則 Files API 経由（アップロード済みならその URI を使う）。

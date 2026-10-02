@@ -199,6 +199,7 @@ def _persona_block(persona: dict | None) -> str:
 def build_roleplay_prompt(
     scenario_lines: list[str],
     talk_script: str | None = None,
+    scenario_hints: list[str] | None = None,
     knowledge_base: str | None = None,
     focus: str | None = None,
     persona: dict | None = None,
@@ -216,6 +217,7 @@ def build_roleplay_prompt(
         meeting_context=meeting_context, previous_one_point=previous_one_point,
     )
     lines = "\n".join(f"{i+1}. お客様「{t}」" for i, t in enumerate(scenario_lines))
+    hint_block = _roleplay_hint_block(scenario_lines, scenario_hints)
     focus_block = _focus_block(focus) + _persona_block(persona)
     script_note = (
         "上の『模範トーク（社内基準）』が今回の**模範トークスクリプト**です。"
@@ -235,7 +237,46 @@ def build_roleplay_prompt(
 - お客様の声が無いため、感情の読み取りは「営業役の間・トーン・言い回し」と、
   台本のお客様セリフから推測できる心理をもとに評価してください。
 - feedback の timestamp は、何ターン目かを "T1" "T2" のように記してください。
+{hint_block}
+# 【1人ロープレの採点・指摘で必ず守ること】
+- **カンペ（上の「お手本」）どおりに言えていれば、その項目は 3 以上**を付ける。
+  言い回しの細かな違い・要約・順番の入れ替えは、意図が同じなら減点しない。
+  お手本を実行できたのに低い点が出ると、練習そのものが続かなくなる。
+- **その単元で出番が無かった観点は 3（標準）**にする。場面が無かったことを
+  「できなかった」として低く付けない。0 点は付けない（最低は 1）。
+- 1〜2 を付けてよいのは、**お手本にある要素をはっきり落としている**場合だけ。
+  その理由を必ず「お手本では〇〇と伝える場面」と具体的に書く。
+
+# 【「こう言えたら」(feedback) の対象にしてよい発話】
+- 対象にするのは **商品説明・質問・提案・切り返し など、中身のあるトーク**だけ。
+- **相槌・返事だけの発話は対象にしない**（例：「はい」「ええ」「そうですね」
+  「なるほど」「確かに」「ありがとうございます」「分かりました」）。
+  相槌の言い換えを指摘しても、話し方の練習にならない。
+- before には、営業役が実際に話した**1文以上のトーク**をそのまま書く。
+  相槌しか無いターンは feedback を作らず、飛ばしてよい。
+- after は、その場で言い換えられる**具体的なトーク**にする（抽象的な助言にしない）。
 {focus_block}"""
+
+
+def _roleplay_hint_block(lines: list[str], hints: list[str] | None) -> str:
+    """各ターンの「お手本（カンペ）」を渡す。
+
+    これを渡していなかったため、AIは練習者が何を言うべきだったかを知らないまま
+    採点していた。カンペどおりに言えたのに低い点・言い換えの指摘が出て、
+    プランナーのやる気を削いだ（2026-09-20）。採点の基準はここに置く。
+    """
+    rows = []
+    for i, hint in enumerate(hints or []):
+        text = (hint or "").strip()
+        if not text:
+            continue
+        who = lines[i] if i < len(lines) else ""
+        rows.append(f"■ T{i+1}（お客様「{who[:40]}」に対して）\n{text[:1200]}")
+    if not rows:
+        return ""
+    return ("\n# 【各ターンのお手本（練習者に表示していたカンペ）】\n"
+            "練習者はこれを見ながら話しています。**これを言えていれば合格**として採点し、"
+            "指摘はここからの抜け漏れに絞ってください。\n" + "\n\n".join(rows) + "\n")
 
 
 def _focus_block(focus: str | None) -> str:
