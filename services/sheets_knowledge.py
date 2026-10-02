@@ -170,6 +170,30 @@ def append_improvement(row: list[str], sender: str = "") -> list[str]:
     return written
 
 
+def append_improvements(rows: list[list[str]], tab: str = "") -> int:
+    """複数行をまとめて追記する（過去分の取り込み用・全体タブのみ）。"""
+    if not rows:
+        return 0
+    svc = _service()
+    sid = _improve_sheet_id()
+    target = tab or settings.IMPROVEMENT_TAB
+    _ensure_tab(svc, target, sheet_id=sid)
+    try:
+        head = svc.spreadsheets().values().get(
+            spreadsheetId=sid, range=f"{target}!A1:E1").execute()
+        if not head.get("values"):
+            svc.spreadsheets().values().update(
+                spreadsheetId=sid, range=f"{target}!A1",
+                valueInputOption="RAW", body={"values": [_IMPROVE_HEADER]}).execute()
+    except Exception:  # noqa: BLE001 見出しが入らなくても記録は残す
+        pass
+    svc.spreadsheets().values().append(
+        spreadsheetId=sid, range=f"{target}!A:E",
+        valueInputOption="RAW", insertDataOption="INSERT_ROWS",
+        body={"values": rows}).execute()
+    return len(rows)
+
+
 def load_improvements(tab: str = "") -> list[dict]:
     """改善履歴を新しい順で返す。読めなければ空。"""
     try:

@@ -203,7 +203,7 @@ IMPROVEMENT_SHEET_ID = os.getenv(
 # 全体の修正ログと、依頼者ごとの個別タブ。
 IMPROVEMENT_TAB = os.getenv("IMPROVEMENT_TAB", "修正ログ（全体）")
 IMPROVEMENT_PERSONAL_TABS = {
-    "s.kageyama@life-time-support.com": "修正ログ（影山さん）",
+    "s.kageyama@life-time-support.com": "修正ログ（景山さん）",
 }
 
 

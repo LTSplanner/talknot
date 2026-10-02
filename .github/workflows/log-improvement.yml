@@ -5,7 +5,7 @@ name: log-improvement
 #
 # 使い方：Actions タブ → log-improvement → Run workflow → 各欄を埋める
 #   sender に s.kageyama@life-time-support.com を入れると、
-#   「改善履歴（影山）」タブにも同じ行が残る。
+#   「改善履歴（景山）」タブにも同じ行が残る。
 #
 # 必要な GitHub Secrets: KNOWLEDGE_SHEET_ID / KNOWLEDGE_SA_JSON
 
@@ -13,8 +13,11 @@ on:
   workflow_dispatch:
     inputs:
       what:
-        description: "改善内容（必須）"
-        required: true
+        description: "改善内容（1件ずつ記録するとき）"
+        required: false
+      file:
+        description: "まとめて取り込むTSVのパス（例: docs/improvement_log.tsv）"
+        required: false
       before:
         description: "ビフォー（直す前はどうだったか）"
         required: false
@@ -51,7 +54,8 @@ jobs:
           KNOWLEDGE_SA_JSON: ${{ secrets.KNOWLEDGE_SA_JSON }}
         run: |
           python scripts/log_improvement.py \
-            --what "${{ inputs.what }}" \
+            ${{ inputs.file && format('--file "{0}"', inputs.file) || '' }} \
+            ${{ inputs.what && format('--what "{0}"', inputs.what) || '' }} \
             --before "${{ inputs.before }}" \
             --after "${{ inputs.after }}" \
             --note "${{ inputs.note }}" \
