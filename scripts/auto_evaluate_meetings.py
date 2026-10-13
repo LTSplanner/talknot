@@ -172,7 +172,9 @@ def _process_one(
         except Exception:  # noqa: BLE001 履歴が読めなくても評価は続ける
             previous = None
         result = gemini_analyzer.analyze(
-            tmp, reference_talk, knowledge, context, previous)
+            tmp, reference_talk, knowledge, context, previous,
+            # 2つの視点（ナレッジ／目指す営業像）を必須にする（先行公開から）。
+            require_lenses=settings.feature_visible("eval_lenses", planner))
         _log(f"  AI解析が完了: 通算 {time.time() - started:.0f}秒 "
              f"/ 指摘 {len(result.feedback)}件")
         storage.save_evaluation(planner, result, label=summary)

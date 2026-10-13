@@ -293,7 +293,11 @@ def build_evaluation_prompt(
     previous_one_point: dict | None = None,
     duration_sec: float | None = None,
     segment: tuple[float, float, float | None] | None = None,
+    lens_knowledge_status: str | None = None,
 ) -> str:
+    """商談評価のプロンプト。lens_knowledge_status を渡すと 2つの視点を必須にする。"""
+    lens_block = (lenses.lens_prompt_block(lens_knowledge_status)
+                  if lens_knowledge_status else "")
     criteria_keys = " / ".join(c.key for c in settings.EVALUATION_CRITERIA)
     criteria_lines = "\n".join(
         f"- {c.key} ({c.number} {c.title}): {c.description}"
@@ -551,4 +555,5 @@ JSON を書き終えたら、出力する前に次を1つずつ数えて確認�
 - johari.comment：60字以内
 - feedback のタイムスタンプが**商談の全長に散っているか**（前半に固まっていたら中盤・終盤を見直して足す。件数の上限は無い）
 削るときは**抽象的な説明から先に落とす**。具体的なセリフ・タイムスタンプ・数字は残す。
-（分量を守ることは、内容を厚くすることより優先される。読み手が次の商談で1つ直せることが目的。）"""
+（分量を守ることは、内容を厚くすることより優先される。読み手が次の商談で1つ直せることが目的。）
+{lens_block}"""

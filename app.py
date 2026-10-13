@@ -226,6 +226,8 @@ def _analyze_worker(
                 storage.get_knowledge_base(),
                 meeting_context,
                 _previous_one_point(user_email),
+                # 2つの視点（ナレッジ／目指す営業像）を必須にする（先行公開から）。
+                require_lenses=settings.feature_visible("eval_lenses", user_email),
             )
         storage.finish_evaluation(user_email, job_id, result, label)
         # 商談から抽出した弊社ナレッジを蓄積（使うほど評価が弊社仕様に賢くなる）

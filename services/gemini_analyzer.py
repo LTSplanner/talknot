@@ -322,14 +322,61 @@ def _synthesize_overall(client, merged: dict, duration_sec: float | None) -> dic
     return _loads_lenient(resp.text, repair=True)
 
 
+def _synthesize_lenses(client, merged: dict, duration_sec: float | None,
+                       knowledge_base: str, knowledge_status: str) -> dict:
+    """区間に分けた商談の、全体としての 2つの視点を作る（テキストだけで安く）。
+
+    欠けていれば1回だけ作り直させ、それでも欠けたら LensMissingError。
+    """
+    scenes = [
+        f"- {f.get('timestamp', '')} お客様「{f.get('customer_line', '')[:60]}」"
+        f" → 営業「{f.get('before', '')[:80]}」"
+        for f in (merged.get("feedback") or [])[:40]
+    ]
+    needs = [
+        f"- {h.get('timestamp', '')} {h.get('inferred_need', '')[:60]}"
+        f"（{'踏み込めた' if h.get('surfaced') else '取りこぼし'}）"
+        for h in (merged.get("hidden_needs") or [])[:30]
+    ]
+    length = f"約{int((duration_sec or 0) // 60)}分" if duration_sec else "不明"
+    text = (
+        "あなたは住宅営業のコーチです。ある商談を時間帯ごとに分析した結果を渡します。"
+        "**商談全体を1つとして見て**、2つの視点の評価だけを JSON で返してください。"
+        "出力は {\"lenses\": {...}} の形。前後に説明文やコードフェンスを付けないこと。\n\n"
+        f"# 弊社ナレッジ\n{knowledge_base[:60000]}\n"
+        f"{lenses.lens_prompt_block(knowledge_status)}\n"
+        f"# 商談の長さ\n{length}\n\n"
+        "# 時系列の場面（営業の発言）\n" + "\n".join(scenes) + "\n\n"
+        "# 読み取った隠れたニーズ\n" + "\n".join(needs)
+    )
+    cfg = types.GenerateContentConfig(
+        response_mime_type="application/json",
+        max_output_tokens=8192,
+        thinking_config=types.ThinkingConfig(thinking_budget=_THINKING_BUDGET),
+    )
+    data = _loads_lenient(_generate_retrying(client, [text], cfg).text, repair=True)
+    try:
+        lenses.require_lenses(data)
+    except lenses.LensMissingError:
+        resp = _generate_retrying(client, [text, _STRICT_LENSES], cfg)
+        data = _loads_lenient(resp.text, repair=True)
+        lenses.require_lenses(data)
+    return data["lenses"]
+
+
 def analyze(
     video_path: str,
     reference_talk: str | None = None,
     knowledge_base: str | None = None,
     meeting_context: dict | None = None,
     previous_one_point: dict | None = None,
+    require_lenses: bool = False,
 ) -> EvaluationResult:
     """動画/音声ファイルを解析し EvaluationResult を返す。
+
+    require_lenses=True なら 2つの視点（ナレッジ／目指す営業像）を必須にする。
+    1本で読むときは評価の本体で書かせ、区間に分けたときは全体のまとめで書かせる。
+    欠けていれば1回だけ作り直させ、それでも欠けたら失敗にする（自動評価が後で再評価）。
 
     meeting_context は core.meeting_context.build_meeting_context() が返す確定情報
     （営業担当氏名・お客様名・物件名・案件番号）。渡すと固有名詞を聞き取りに頼らず
@@ -339,6 +386,9 @@ def analyze(
     渡すと「前回の1点ができたか」を答え合わせし、未達なら同じ課題を継続させる。
     """
     client = _client()
+    knowledge_status = None
+    if require_lenses:
+        knowledge_base, knowledge_status = lenses.resolve_knowledge(knowledge_base)
 
     duration = _probe_duration_sec(video_path)
     chunks = chunking.plan_chunks(duration or 0)
@@ -348,7 +398,17 @@ def analyze(
     if len(chunks) <= 1:
         data = _analyze_one(
             client, video_path, reference_talk, knowledge_base,
-            meeting_context, previous_one_point, duration)
+            meeting_context, previous_one_point, duration,
+            lens_knowledge_status=knowledge_status)
+        if require_lenses:
+            try:
+                lenses.require_lenses(data)
+            except lenses.LensMissingError:
+                data = _analyze_one(
+                    client, video_path, reference_talk, knowledge_base,
+                    meeting_context, previous_one_point, duration,
+                    lens_knowledge_status=knowledge_status, extra=_STRICT_LENSES)
+                lenses.require_lenses(data)
     else:
         parts = []
         for i, (start, end) in enumerate(chunks, 1):
@@ -383,6 +443,13 @@ def analyze(
         except Exception as e:  # noqa: BLE001 まとめに失敗しても区間の結果は返す
             print(f"    全体のまとめに失敗（区間の結果のみ返します）: {str(e)[:120]}",
                   flush=True)
+        if require_lenses:
+            # 2つの視点は必須。まとめに失敗したら評価全体を失敗にする（後で再評価）。
+            data["lenses"] = _synthesize_lenses(
+                client, data, duration, knowledge_base, knowledge_status)
+
+    if require_lenses:
+        data["knowledge_status"] = knowledge_status
 
     # 「〇〇様」のまま出たセリフを実名に直す（そのまま口に出せることが価値なので）。
     data = fill_customer_placeholders(data, (meeting_context or {}).get("customer_name", ""))
@@ -392,6 +459,7 @@ def analyze(
 def _analyze_one(
     client, video_path: str, reference_talk, knowledge_base,
     meeting_context, previous_one_point, duration, segment=None,
+    lens_knowledge_status: str | None = None, extra: str = "",
 ) -> dict:
     """動画1本（または1区間）を解析して、生の JSON を返す。"""
     fps = _target_fps(video_path)
@@ -400,7 +468,9 @@ def _analyze_one(
 
     prompt = prompts.build_evaluation_prompt(
         reference_talk, knowledge_base, meeting_context, previous_one_point,
-        duration, segment)
+        duration, segment, lens_knowledge_status=lens_knowledge_status)
+    if extra:
+        prompt = f"{prompt}\n\n{extra}"
 
     cfg = types.GenerateContentConfig(
         response_mime_type="application/json",

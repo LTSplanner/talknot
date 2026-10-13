@@ -115,6 +115,14 @@ class _Client:
                 return pytypes.SimpleNamespace(text=json.dumps(outer.replies.pop(0)))
 
         class _Files:
+            def upload(self, file):
+                return pytypes.SimpleNamespace(
+                    name="files/x", uri="files/x", mime_type="audio/wav",
+                    state=pytypes.SimpleNamespace(name="ACTIVE"))
+
+            def get(self, name):
+                return self.upload(None)
+
             def delete(self, name):
                 pass
 
@@ -162,6 +170,56 @@ def test_roleplay_fails_when_lenses_still_missing(genai_with):
     with pytest.raises(lenses.LensMissingError):
         gemini_analyzer.analyze_roleplay([b"x"], ["こんにちは"], knowledge_base="知識",
                                          require_lenses=True)
+
+
+@pytest.fixture
+def short_meeting(monkeypatch, tmp_path):
+    """45分以下の商談（1本で読む）として扱う。"""
+    monkeypatch.setattr(gemini_analyzer, "_probe_duration_sec", lambda p: 600.0)
+    audio = tmp_path / "meeting.m4a"
+    audio.write_bytes(b"\x00")
+    return str(audio)
+
+
+def test_meeting_requires_lenses_and_records_status(genai_with, short_meeting):
+    genai_with(_with_lenses())
+    r = gemini_analyzer.analyze(short_meeting, knowledge_base=None, require_lenses=True)
+    assert r.knowledge_status == "fallback"
+    assert r.lenses.ideal.stumble
+
+
+def test_meeting_retries_then_fails_without_lenses(genai_with, short_meeting):
+    client = genai_with(copy.deepcopy(SAMPLE), copy.deepcopy(SAMPLE))
+    with pytest.raises(lenses.LensMissingError):
+        gemini_analyzer.analyze(short_meeting, knowledge_base="知識", require_lenses=True)
+    assert client.calls == 2
+
+
+def test_meeting_unchanged_when_not_required(genai_with, short_meeting):
+    client = genai_with(copy.deepcopy(SAMPLE))
+    r = gemini_analyzer.analyze(short_meeting, knowledge_base="知識")
+    assert client.calls == 1
+    assert r.lenses is None and r.knowledge_status == ""
+
+
+def test_long_meeting_lenses_are_synthesized(genai_with):
+    client = genai_with({"lenses": copy.deepcopy(LENSES)})
+    got = gemini_analyzer._synthesize_lenses(
+        client, copy.deepcopy(SAMPLE), 3600.0, "知識", lenses.KNOWLEDGE_FULL)
+    assert got["ideal"]["root_cause"]
+
+
+def test_long_meeting_synthesis_fails_without_lenses(genai_with):
+    client = genai_with({}, {})
+    with pytest.raises(lenses.LensMissingError):
+        gemini_analyzer._synthesize_lenses(
+            client, copy.deepcopy(SAMPLE), 3600.0, "知識", lenses.KNOWLEDGE_FULL)
+    assert client.calls == 2
+
+
+def test_evaluation_prompt_includes_lenses_only_when_required():
+    assert '"lenses"' not in prompts.build_evaluation_prompt()
+    assert '"lenses"' in prompts.build_evaluation_prompt(lens_knowledge_status="full")
 
 
 def test_roleplay_unchanged_when_not_required(genai_with):
