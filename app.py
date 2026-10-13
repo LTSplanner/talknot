@@ -1286,6 +1286,15 @@ def render_roleplay_tab(user: dict) -> None:
             if c not in cat_order:
                 cat_order.insert(idx, c)
                 idx += 1
+    # 応用⑤「実践スキル」も同じ形で制御（フラグOFFなら先行公開の対象者と管理者だけ）。
+    if settings.feature_visible("skill_tracks", user.get("email")):
+        _skill_pref = ["実践スキル（決める力）", "実践スキル（広げる力）"]
+        present = {str(s.get("group", "")) for s in pool}
+        idx = cat_order.index("その他") if "その他" in cat_order else len(cat_order)
+        for c in _skill_pref:
+            if c in present and c not in cat_order:
+                cat_order.insert(idx, c)
+                idx += 1
     groups: dict[str, list[dict]] = {}
     for cat in cat_order:
         g = [s for s in pool if s.get("group") == cat]
@@ -1300,6 +1309,8 @@ def render_roleplay_tab(user: dict) -> None:
     # 管理者プレビュー時（フラグOFFなのに反論対応が見えている）は準備中と分かるよう注記
     if group.startswith("反論対応") and not settings.feature_enabled("objection_drill"):
         st.caption("🧪 準備中（管理者のみ表示）— 基礎習得後にプランナーへ開放予定の応用ドリルです。")
+    if group.startswith("実践スキル") and not settings.feature_enabled("skill_tracks"):
+        st.caption("🧪 準備中（先行公開のみ表示）— 確認後に全員へ開放予定の単元です。")
     with scol:
         # 同名単元は1つにまとめる（お客様タイプで分けない。未検討版があれば代表に）
         items, seen_t = [], set()

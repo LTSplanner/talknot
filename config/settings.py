@@ -260,12 +260,18 @@ FEATURE_COMPANION = _bool_env("FEATURE_COMPANION", True)
 # 台本を暗記しても読み上げでは終われないようにする。相棒と同時に全員へ公開（2026-09-06）。
 FEATURE_ROLEPLAY_VARIETY = _bool_env("FEATURE_ROLEPLAY_VARIETY", True)
 
+# 応用⑤「実践スキル」。実際の商談でよく効いていた動き（内覧会同行の仮押さえ、
+# 暮らしの場面から商材を広げる 等）を練習する単元。「決める力」「広げる力」の2カテゴリ。
+# 2026-10-13 追加。まず先行公開の対象者で確かめてから True にして全員へ。
+FEATURE_SKILL_TRACKS = _bool_env("FEATURE_SKILL_TRACKS", False)
+
 # 機能名 → フラグ値の対応表（未知の名前は False）。
 _FEATURE_FLAGS = {
     "objection_drill": FEATURE_OBJECTION_DRILL,
     "feedback_box": FEATURE_FEEDBACK_BOX,
     "companion": FEATURE_COMPANION,
     "roleplay_variety": FEATURE_ROLEPLAY_VARIETY,
+    "skill_tracks": FEATURE_SKILL_TRACKS,
 }
 
 

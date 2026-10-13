@@ -52,6 +52,12 @@ class TestFeatureFlags:
         assert settings.feature_enabled("objection_drill") is True
         assert settings.feature_visible("objection_drill", "other@life-time-support.com")
 
+    def test_skill_tracks_hidden_from_planners_when_off(self, monkeypatch):
+        # 実践スキルは先行公開から。フラグOFFならプランナーには見せない
+        assert "skill_tracks" in settings._FEATURE_FLAGS
+        monkeypatch.setattr(settings, "_FEATURE_FLAGS", {"skill_tracks": False})
+        assert not settings.feature_visible("skill_tracks", "other@life-time-support.com")
+
 
 def test_criteria_are_five_and_unique_keys():
     assert len(settings.EVALUATION_CRITERIA) == 5
