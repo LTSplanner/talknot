@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 from config import settings
+from core import lenses
 from core import meeting_context as _mc
 
 
@@ -205,12 +206,14 @@ def build_roleplay_prompt(
     persona: dict | None = None,
     meeting_context: dict | None = None,
     previous_one_point: dict | None = None,
+    lens_knowledge_status: str | None = None,
 ) -> str:
     """1人ロープレ（台本のお客様 × 音声で応答）の評価プロンプト。
 
     添付音声は「営業役（練習者）の発話だけ」。お客様のセリフは下の台本で進行している。
     評価の構造は通常の商談評価と同じ JSON に揃える（履歴・UIをそのまま使うため）。
     meeting_context には練習者の氏名を入れる（お客様は台本の架空ペルソナなので入れない）。
+    lens_knowledge_status を渡すと、2つの視点（core/lenses.py）での評価を必須にする。
     """
     base = build_evaluation_prompt(
         reference_talk=talk_script, knowledge_base=knowledge_base,
@@ -255,7 +258,7 @@ def build_roleplay_prompt(
 - before には、営業役が実際に話した**1文以上のトーク**をそのまま書く。
   相槌しか無いターンは feedback を作らず、飛ばしてよい。
 - after は、その場で言い換えられる**具体的なトーク**にする（抽象的な助言にしない）。
-{focus_block}"""
+{focus_block}{lenses.lens_prompt_block(lens_knowledge_status) if lens_knowledge_status else ""}"""
 
 
 def _roleplay_hint_block(lines: list[str], hints: list[str] | None) -> str:

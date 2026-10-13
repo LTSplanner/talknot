@@ -373,6 +373,44 @@ class TimestampedFeedback:
 
 
 @dataclass
+class KnowledgePoint:
+    """視点①ナレッジ：発言を社内ナレッジに照らした1件。"""
+    timestamp: str = ""
+    said: str = ""        # 営業役の発言
+    knowledge: str = ""   # 照らしたナレッジ（要点）
+    comment: str = ""     # 合っていた／ずれていた点と、こう言えば良い
+
+
+@dataclass
+class KnowledgeLens:
+    verdict: str = ""     # 合っていた | 一部ずれ | ずれが大きい
+    points: list[KnowledgePoint] = field(default_factory=list)
+    comment: str = ""
+
+
+@dataclass
+class IdealStep:
+    """視点②目指す営業像：良い商談5点の1つぶんの到達度。"""
+    name: str = ""
+    status: str = ""      # できた | 一部 | できていない | 出番なし
+    note: str = ""
+
+
+@dataclass
+class IdealLens:
+    steps: list[IdealStep] = field(default_factory=list)
+    stumble: str = ""     # 一番つまずいたところ
+    root_cause: str = ""  # その本当の原因
+    comment: str = ""
+
+
+@dataclass
+class Lenses:
+    knowledge: KnowledgeLens = field(default_factory=KnowledgeLens)
+    ideal: IdealLens = field(default_factory=IdealLens)
+
+
+@dataclass
 class EvaluationResult:
     scores: list[CriterionScore] = field(default_factory=list)
     johari: "JohariAllocation | None" = None  # 会話配分（ジョハリの窓）
@@ -383,6 +421,9 @@ class EvaluationResult:
     customer_profile: "CustomerProfile | None" = None  # お客様の攻略メモ（次回の活かし方）
     one_point: "OnePoint | None" = None  # 次に直す1点（結果画面の最上部に出す要約）
     follow_up: "FollowUp | None" = None  # 前回の1点ができていたかの答え合わせ
+    lenses: "Lenses | None" = None  # 2つの視点（ナレッジ／目指す営業像）
+    # 評価に使ったナレッジ："full"＝共有シート／"fallback"＝控えの知識（再評価をすすめる）／""＝記録なし
+    knowledge_status: str = ""
 
     @property
     def total(self) -> int:
@@ -515,6 +556,8 @@ class EvaluationResult:
                 comment=fu.get("comment") or "",
             )
 
+        lenses = cls._parse_lenses(data.get("lenses"))
+
         # 定義外の評価項目キーは捨てる。AI が勝手なキー（例 natural_needs_発掘）を
         # 返すことがあり、そのまま数えると6項目目として合計に乗り、26/25 のような
         # 上限を超えた点数になってしまう。画面にも表示できないキーなので落とす。
@@ -553,6 +596,39 @@ class EvaluationResult:
             customer_profile=customer_profile,
             one_point=one_point,
             follow_up=follow_up,
+            lenses=lenses,
+            knowledge_status=str(data.get("knowledge_status") or ""),
+        )
+
+    @staticmethod
+    def _parse_lenses(raw) -> "Lenses | None":
+        """2つの視点を復元する。無い・形が違うときは None（過去データ）。"""
+        if not isinstance(raw, dict):
+            return None
+        kn = raw.get("knowledge") if isinstance(raw.get("knowledge"), dict) else {}
+        ideal = raw.get("ideal") if isinstance(raw.get("ideal"), dict) else {}
+        if not kn and not ideal:
+            return None
+        points = [
+            KnowledgePoint(
+                timestamp=str(p.get("timestamp") or ""),
+                said=_strip_speaker(str(p.get("said") or "")),
+                knowledge=str(p.get("knowledge") or ""),
+                comment=str(p.get("comment") or ""),
+            )
+            for p in (kn.get("points") or []) if isinstance(p, dict)
+        ]
+        steps = [
+            IdealStep(name=str(s.get("name") or ""), status=str(s.get("status") or ""),
+                      note=str(s.get("note") or ""))
+            for s in (ideal.get("steps") or []) if isinstance(s, dict) and s.get("name")
+        ]
+        return Lenses(
+            knowledge=KnowledgeLens(verdict=str(kn.get("verdict") or ""), points=points,
+                                    comment=str(kn.get("comment") or "")),
+            ideal=IdealLens(steps=steps, stumble=str(ideal.get("stumble") or ""),
+                            root_cause=str(ideal.get("root_cause") or ""),
+                            comment=str(ideal.get("comment") or "")),
         )
 
     def to_dict(self) -> dict:
@@ -566,4 +642,21 @@ class EvaluationResult:
             "customer_profile": vars(self.customer_profile) if self.customer_profile else None,
             "one_point": vars(self.one_point) if self.one_point else None,
             "follow_up": vars(self.follow_up) if self.follow_up else None,
+            "lenses": _lenses_dict(self.lenses),
+            "knowledge_status": self.knowledge_status,
         }
+
+
+def _lenses_dict(lenses: "Lenses | None") -> dict | None:
+    """2つの視点を保存用の dict にする（入れ子の dataclass も展開する）。"""
+    if not lenses:
+        return None
+    return {
+        "knowledge": {"verdict": lenses.knowledge.verdict,
+                      "points": [vars(p) for p in lenses.knowledge.points],
+                      "comment": lenses.knowledge.comment},
+        "ideal": {"steps": [vars(s) for s in lenses.ideal.steps],
+                  "stumble": lenses.ideal.stumble,
+                  "root_cause": lenses.ideal.root_cause,
+                  "comment": lenses.ideal.comment},
+    }

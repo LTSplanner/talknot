@@ -380,6 +380,38 @@ def _hidden_needs_panel(hidden_needs: list) -> None:
             (st.info if h.surfaced else st.warning)(h.note)
 
 
+_IDEAL_MARK = {"できた": "✅", "一部": "🔸", "できていない": "⚠️", "出番なし": "➖"}
+
+
+def _lenses_panel(lenses) -> None:
+    """2つの視点（①社内ナレッジ ②目指す営業像）から見た評価。"""
+    kn, ideal = lenses.knowledge, lenses.ideal
+    st.markdown("##### ① 社内ナレッジから見て")
+    if kn.verdict:
+        st.markdown(f"**判定：{kn.verdict}**")
+    if kn.comment:
+        st.info(kn.comment)
+    for p in kn.points:
+        head = f"⏱ {p.timestamp}　" if p.timestamp else ""
+        if p.said:
+            st.markdown(f"{head}「{p.said}」")
+        if p.knowledge:
+            st.caption(f"📚 照らした知識：{p.knowledge}")
+        if p.comment:
+            st.write(p.comment)
+
+    st.markdown("##### ② 目指す営業像から見て")
+    for s in ideal.steps:
+        mark = _IDEAL_MARK.get(s.status, "・")
+        st.markdown(f"{mark} **{s.name}**（{s.status}）" + (f"　{s.note}" if s.note else ""))
+    if ideal.stumble:
+        st.warning(f"つまずいたところ：{ideal.stumble}")
+    if ideal.root_cause:
+        st.markdown(f"**本当の原因：** {ideal.root_cause}")
+    if ideal.comment:
+        st.success(ideal.comment)
+
+
 def evaluation_result(result: EvaluationResult) -> None:
     """評価結果を表示する。
 
@@ -389,6 +421,10 @@ def evaluation_result(result: EvaluationResult) -> None:
     以前は畳んだ見出しを縦に積んでいたが、場面ごとの開閉と section の開閉が
     同じ見た目で混ざり、どこに何があるか分からなくなっていた。
     """
+    if result.knowledge_status == "fallback":
+        st.warning("⚠️ 社内ナレッジを読み込めなかったため、控えの知識で評価しました。"
+                   "評価がずれている可能性があるので、再評価をおすすめします。")
+
     _follow_up_card(result.follow_up)
 
     op = result.one_point
@@ -405,6 +441,8 @@ def evaluation_result(result: EvaluationResult) -> None:
     if result.feedback:
         panels.append((f"🎬 決定的（{len(result.feedback)}）",
                        lambda: _scene_timeline(result.feedback)))
+    if result.lenses:
+        panels.append(("🎯 2つの視点", lambda: _lenses_panel(result.lenses)))
     if result.scores:
         panels.append((f"📊 スコア（{result.overall_total}/{full}）",
                        lambda: _scores_panel(result)))

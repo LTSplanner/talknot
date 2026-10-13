@@ -17,7 +17,7 @@ from google import genai
 from google.genai import types
 
 from config import settings
-from core import chunking, prompts
+from core import chunking, lenses, prompts
 from core.meeting_context import fill_customer_placeholders
 from core.models import EvaluationResult
 
@@ -456,15 +456,22 @@ def analyze_roleplay(
     audio_files: list[dict] | None = None,
     thinking_budget: int | None = None,
     scenario_hints: list[str] | None = None,
+    require_lenses: bool = False,
 ) -> EvaluationResult:
     """1人ロープレの録音（ターンごと）をまとめて1回の呼び出しで評価する。
 
     会話中は AI を呼ばず台本で進めるため、Gemini の呼び出しはこの1回だけ＝無料枠にやさしい。
+    require_lenses=True なら、2つの視点（ナレッジ／目指す営業像）を必須にする：
+    ナレッジが読めなければ控えの知識で評価し（knowledge_status="fallback"）、
+    視点が欠けた返答は1回だけ作り直させ、それでも欠けたら失敗にする（定期実行で再評価）。
     """
     client = _client()
+    knowledge_status = None
+    if require_lenses:
+        knowledge_base, knowledge_status = lenses.resolve_knowledge(knowledge_base)
     prompt = prompts.build_roleplay_prompt(
         scenario_lines, talk_script, scenario_hints, knowledge_base, focus, persona,
-        meeting_context, previous_one_point)
+        meeting_context, previous_one_point, lens_knowledge_status=knowledge_status)
 
     # 音声は原則 Files API 経由（アップロード済みならその URI を使う）。
     # リクエストへの埋め込みは約20MBが上限で、スマホの長い録音では超えてしまう。
@@ -503,9 +510,24 @@ def analyze_roleplay(
         except json.JSONDecodeError:
             resp = _generate_retrying(client, contents + [_STRICT_JSON], cfg)
             data = _loads_lenient(resp.text, repair=True)
+        if require_lenses:
+            try:
+                lenses.require_lenses(data)
+            except lenses.LensMissingError:
+                # 2つの視点が欠けていたら1回だけ作り直させる。まだ欠けていれば失敗にする。
+                resp = _generate_retrying(client, contents + [_STRICT_LENSES], cfg)
+                data = _loads_lenient(resp.text, repair=True)
+                lenses.require_lenses(data)
+            data["knowledge_status"] = knowledge_status
     finally:
         _cleanup_files(client, uploaded_names)
     return EvaluationResult.from_dict(data)
+
+
+_STRICT_LENSES = (
+    "前回の返答には、必須の \"lenses\"（視点①ナレッジ・視点②目指す営業像）が欠けていました。"
+    "指示どおりの JSON を、\"lenses\" の knowledge と ideal を必ず埋めて、もう一度すべて出力してください。"
+)
 
 
 # リクエストに直接埋め込める音声の合計サイズ。超えたら Files API に切り替える。

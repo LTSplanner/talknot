@@ -105,6 +105,8 @@ def _retry_one(rec: dict, payload: dict) -> bool:
             audio_files=payload.get("audio_files"),
             thinking_budget=budget,
             scenario_hints=payload.get("scenario_hints"),
+            # やり直しでも 2つの視点を必須にする（先行公開から。画面の評価と同じ判定）。
+            require_lenses=settings.feature_visible("eval_lenses", email),
         )
     except Exception as exc:  # noqa: BLE001 次の実行でまた拾う
         print(f"    → まだ失敗: {str(exc)[:120]}")

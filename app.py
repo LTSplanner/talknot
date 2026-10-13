@@ -995,6 +995,8 @@ def _roleplay_worker(
                 previous_one_point=_previous_one_point(user_email),
                 audio_files=audio_files,
                 scenario_hints=scenario_hints,
+                # 2つの視点（ナレッジ／目指す営業像）を必須にする（先行公開から）。
+                require_lenses=settings.feature_visible("eval_lenses", user_email),
             )
         storage.finish_evaluation(user_email, job_id, result, label)
         storage.append_knowledge(result.knowledge)

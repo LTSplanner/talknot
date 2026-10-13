@@ -265,6 +265,11 @@ FEATURE_ROLEPLAY_VARIETY = _bool_env("FEATURE_ROLEPLAY_VARIETY", True)
 # 2026-10-13 追加。まず先行公開の対象者で確かめてから True にして全員へ。
 FEATURE_SKILL_TRACKS = _bool_env("FEATURE_SKILL_TRACKS", False)
 
+# 応用⑥「2つの視点の評価」。ロープレ評価で、ナレッジ視点と目指す営業像視点を必須の欄にする
+# （欠けたら受け付けない）。ナレッジが読めなければ控えの知識で評価し、再評価をすすめる。
+# 評価の中身が変わるため、まず先行公開の対象者の評価だけに効かせて出力を確かめる。
+FEATURE_EVAL_LENSES = _bool_env("FEATURE_EVAL_LENSES", False)
+
 # 機能名 → フラグ値の対応表（未知の名前は False）。
 _FEATURE_FLAGS = {
     "objection_drill": FEATURE_OBJECTION_DRILL,
@@ -272,6 +277,7 @@ _FEATURE_FLAGS = {
     "companion": FEATURE_COMPANION,
     "roleplay_variety": FEATURE_ROLEPLAY_VARIETY,
     "skill_tracks": FEATURE_SKILL_TRACKS,
+    "eval_lenses": FEATURE_EVAL_LENSES,
 }
 
 
